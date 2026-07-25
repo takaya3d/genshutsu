@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>蚊遣 — 大暑 桐始結花</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500&family=EB+Garamond:ital@1&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#ede6d3;touch-action:none;overscroll-behavior:none}
+  canvas{display:block}
+  #frame{
+    position:fixed; inset:16px; border:1px solid rgba(62,52,40,0.16);
+    pointer-events:none;
+  }
+  #title{
+    position:fixed; top:10vh; right:9vw;
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif; font-weight:500;
+    font-size:clamp(30px,5.4vmin,52px); letter-spacing:0.62em; color:#33302b;
+    opacity:0; transition:opacity 3.5s ease; user-select:none; pointer-events:none;
+  }
+  #sub{
+    position:fixed; top:10.5vh; right:calc(9vw + 5.4vmin + 26px);
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif;
+    font-size:clamp(10px,1.5vmin,13px); letter-spacing:0.46em; color:rgba(51,48,43,0.52);
+    opacity:0; transition:opacity 3.5s ease 1.4s; user-select:none; pointer-events:none;
+  }
+  #seal{
+    position:fixed; right:calc(9vw + 0.6vmin); top:calc(10vh + 30vmin);
+    width:clamp(20px,3vmin,28px); height:clamp(20px,3vmin,28px);
+    background:#b8432f; color:#ede6d3; border-radius:2px;
+    font-family:'Shippori Mincho',serif; font-size:clamp(12px,1.9vmin,17px);
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; transition:opacity 3.5s ease 2.4s; user-select:none; pointer-events:none;
+  }
+  #cap{
+    position:fixed; bottom:7vh; left:8vw;
+    font-family:'EB Garamond',serif; font-style:italic;
+    font-size:clamp(10px,1.5vmin,13px); letter-spacing:0.08em; color:rgba(51,48,43,0.38);
+    opacity:0; transition:opacity 3.5s ease 2s; user-select:none; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="frame"></div>
+<div id="title">蚊遣</div>
+<div id="sub">大暑 初候 桐始結花</div>
+<div id="seal">遣</div>
+<div id="cap">kayari &mdash; the evening burns down, quietly</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// ==== 貴優ノブ ====
+const KNOBS = {
+  // --- 間(ま)の設計 ---
+  tameEmber:   1.1,   // これを上げると、紙の上に火が点るまでの「ため」が長くなる(秒)
+  tameSmoke:   3.4,   // これを上げると、煙の一筋が立ちはじめるまでの「ため」が長くなる(秒)
+  smokeFade:   6.0,   // これを上げると、煙の現れ方がよりゆっくり「ふっと」になる(秒)
+  breathSec:   5.6,   // これを上げると、火と煙が共有する呼吸(明滅と揺れの周期)が深くなる(秒)
+  // --- 鎮まりの設計 ---
+  settleSec:   3.6,   // これを上げると、乱された煙が一筋に還るまでの時間が延びる(秒)
+  trembleAmt:  0.30,  // これを上げると、還るときの「ためらい(震え)」が大きくなる
+  // --- 触れたときの乱れ ---
+  gustRadius:  0.20,  // これを上げると、指の風が届く範囲が広がる
+  gustPower:   0.16,  // これを上げると、ひと撫でで煙が大きくたわむ
+  turbGust:    2.4,   // これを上げると、乱されたときの千切れ方が激しくなる
+  // --- 煙の姿(墨の一筆) ---
+  swayAmp:     0.11,  // これを上げると、無風時のゆらぎが大きくなる
+  meander:     0.16,  // これを上げると、ゆっくり流れるS字の蛇行が深くなる
+  turbBase:    0.5,   // これを上げると、上空での自然なほつれが増える
+  columnH:     1.5,   // これを上げると、煙の届く高さが上がる
+  threadW:     0.006, // これを上げると、根元の一筋が太くなる
+  inkAlpha:    0.62,  // これを上げると、墨が濃くなる
+  bleedAlpha:  0.16,  // これを上げると、和紙へのにじみが強くなる
+  // --- 線香(隠喩: 夕暮れは戻らず燃え進む。乱しても、待つ心は一筋に還る) ---
+  burnMin:     16,    // これを上げると、線香=夕暮れが燃え尽きるまでの時間が延びる(分)
+  coilR:       0.13,  // これを上げると、渦巻が大きくなる
+  // --- 音の設計(撫でると息が鳴る。高さが音階になっている) ---
+  scaleHz:     [293.66, 349.23, 392.0, 440.0, 523.25], // 撫でた高さで選ばれる音階(D4 F4 G4 A4 C5)
+  breathGain:  0.16,  // これを上げると、息の音が大きくなる
+  crackleGain: 0.05,  // これを上げると、呼吸の頂点で火が爆ぜる音が大きくなる
+};
+// ==================
+
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+let aspect = innerWidth/innerHeight;
+const camera = new THREE.OrthographicCamera(-aspect, aspect, 1, -1, 0.1, 10);
+camera.position.z = 1;
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+// ---- 和紙(生成りの紙肌) ----
+const paper = new THREE.Mesh(
+  new THREE.PlaneGeometry(2,2),
+  new THREE.ShaderMaterial({
+    depthTest:false, depthWrite:false,
+    uniforms:{ uRes:{value:new THREE.Vector2(1,1)} },
+    vertexShader:`void main(){ gl_Position = vec4(position.xy, 0.9999, 1.0); }`,
+    fragmentShader:`
+      uniform vec2 uRes;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+      float n2(vec2 p){
+        vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y);
+      }
+      void main(){
+        vec2 uv = gl_FragCoord.xy/uRes;
+        vec3 col = vec3(0.937, 0.910, 0.845);            // 生成り
+        float fiber = n2(uv*vec2(240.0,60.0))*0.6 + n2(uv*vec2(46.0,14.0))*0.4;
+        float blotch = n2(uv*7.0);
+        col *= 1.0 - 0.040*fiber - 0.030*blotch;
+        col = mix(col, col*vec3(0.972,0.985,1.005), uv.y*0.55); // 上空はわずかに冴える
+        vec2 q = (uv-0.5)*vec2(uRes.x/uRes.y,1.0);
+        col *= 1.0 - 0.085*smoothstep(0.5, 1.1, length(q)); // ごく浅い暮色
+        gl_FragColor = vec4(col, 1.0);
+      }`
+  })
+);
+paper.renderOrder = -1;
+paper.frustumCulled = false;
+scene.add(paper);
+
+// ---- リボン(墨の筆致)ユーティリティ ----
+const inkFrag = `
+  uniform float uTime; uniform vec3 uInk; varying vec2 vUv; varying float vA;
+  float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+  float n2(vec2 p){
+    vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+    return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y);
+  }
+  void main(){
+    float across = abs(vUv.x-0.5)*2.0;
+    float grain = n2(vec2(vUv.x*3.0, vUv.y*46.0));
+    float kasure = n2(vec2(vUv.y*22.0, uTime*0.05));         // 筆のかすれ、浅い谷
+    float edge = smoothstep(1.0, 0.25+0.3*grain, across);
+    float a = vA * edge * (0.80 + 0.20*kasure);
+    gl_FragColor = vec4(uInk, a);
+  }`;
+function makeRibbon(N, order){
+  const g = new THREE.BufferGeometry();
+  const pos = new Float32Array(N*2*3), uv = new Float32Array(N*2*2), al = new Float32Array(N*2);
+  const idx = [];
+  for(let i=0;i<N;i++){
+    const s = i/(N-1);
+    uv[(2*i)*2]=0; uv[(2*i)*2+1]=s; uv[(2*i+1)*2]=1; uv[(2*i+1)*2+1]=s;
+    if(i<N-1) idx.push(2*i,2*i+1,2*i+2, 2*i+1,2*i+3,2*i+2);
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv,2));
+  g.setAttribute('aAlpha', new THREE.BufferAttribute(al,1));
+  g.setIndex(idx);
+  const m = new THREE.Mesh(g, new THREE.ShaderMaterial({
+    transparent:true, depthTest:false, depthWrite:false,
+    uniforms:{ uTime:{value:0}, uInk:{value:new THREE.Color('#37342e')} },
+    vertexShader:`
+      attribute float aAlpha; varying vec2 vUv; varying float vA;
+      void main(){ vUv=uv; vA=aAlpha; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: inkFrag,
+  }));
+  m.renderOrder = order;
+  m.frustumCulled = false;
+  scene.add(m);
+  return m;
+}
+
+const SMOKE_N = 120;
+const bleed = makeRibbon(SMOKE_N, 2);   // にじみ層
+const smoke = makeRibbon(SMOKE_N, 3);   // 主筆
+const wisp  = makeRibbon(SMOKE_N, 3);   // 分かれるほつれ
+bleed.material.uniforms.uInk.value = new THREE.Color('#6b665c');
+
+const COIL_N = 240;
+const ash  = makeRibbon(COIL_N, 0);     // 燃え終えた灰の跡
+const coil = makeRibbon(COIL_N, 1);     // 線香の渦巻
+ash.material.uniforms.uInk.value = new THREE.Color('#a49c8e');
+
+// ---- 火(熾) ----
+const ember = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.14,0.14),
+  new THREE.ShaderMaterial({
+    transparent:true, depthTest:false, depthWrite:false,
+    uniforms:{ uGlow:{value:0} },
+    vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader:`
+      uniform float uGlow; varying vec2 vUv;
+      void main(){
+        float d = length(vUv-0.5)*2.0;
+        float core = smoothstep(0.14, 0.03, d);
+        float halo = smoothstep(0.80, 0.0, d);
+        vec3 col = mix(vec3(0.72,0.26,0.18), vec3(0.95,0.56,0.30), core);
+        float a = uGlow * (core + halo*halo*0.45);
+        gl_FragColor = vec4(col, a);
+      }`
+  })
+);
+ember.renderOrder = 4;
+ember.frustumCulled = false;
+scene.add(ember);
+
+// ---- 幾何の配置 ----
+let coilX = 0, coilY = 0;
+function layout(){
+  aspect = innerWidth/innerHeight;
+  camera.left=-aspect; camera.right=aspect; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  const pr = renderer.getPixelRatio();
+  paper.material.uniforms.uRes.value.set(innerWidth*pr, innerHeight*pr);
+  coilX = aspect > 0.8 ? -0.38*aspect : -0.16*aspect;
+  coilY = -0.56;
+}
+layout();
+addEventListener('resize', layout);
+
+// ---- 1Dノイズ ----
+function hash1(i){ const s=Math.sin(i*127.1)*43758.5453; return s-Math.floor(s); }
+function n1(x){ const i=Math.floor(x), f=x-i, u=f*f*(3-2*f); return hash1(i)*(1-u)+hash1(i+1)*u; }
+
+// ---- 線香の渦巻(燃え進む) ----
+const THETA0 = Math.PI*2*2.7;
+let thetaEnd = THETA0;
+const SQUASH = 0.34;
+function coilPoint(th){
+  const r = 0.016 + (KNOBS.coilR-0.016)*(th/THETA0);
+  return [coilX + r*Math.cos(th), coilY + r*Math.sin(th)*SQUASH];
+}
+function updateRibbon(mesh, pts, wArr, aArr){
+  const pos = mesh.geometry.attributes.position.array;
+  const al = mesh.geometry.attributes.aAlpha.array;
+  const N = pts.length;
+  for(let i=0;i<N;i++){
+    const p = pts[i];
+    const q0 = pts[Math.max(0,i-1)], q1 = pts[Math.min(N-1,i+1)];
+    let tx=q1[0]-q0[0], ty=q1[1]-q0[1];
+    const L=Math.hypot(tx,ty)||1; tx/=L; ty/=L;
+    const nx=-ty, ny=tx, w=wArr[i];
+    pos[(2*i)*3]=p[0]+nx*w; pos[(2*i)*3+1]=p[1]+ny*w; pos[(2*i)*3+2]=0;
+    pos[(2*i+1)*3]=p[0]-nx*w; pos[(2*i+1)*3+1]=p[1]-ny*w; pos[(2*i+1)*3+2]=0;
+    al[2*i]=aArr[i]; al[2*i+1]=aArr[i];
+  }
+  mesh.geometry.attributes.position.needsUpdate = true;
+  mesh.geometry.attributes.aAlpha.needsUpdate = true;
+}
+function updateCoil(){
+  const ptsC=[], wC=[], aC=[], ptsA=[], wA=[], aA=[];
+  for(let i=0;i<COIL_N;i++){
+    const s=i/(COIL_N-1);
+    // 灰: 燃え終えた区間のかすかな跡(時間の抜け殻)
+    const thA = thetaEnd + (THETA0-thetaEnd)*s;
+    ptsA.push(coilPoint(thA)); wA.push(0.0085); aA.push(0.16);
+    // 現body: 内端→燃え口
+    const thC = thetaEnd*s;
+    ptsC.push(coilPoint(thC));
+    wC.push(0.009*(0.85+0.3*n1(s*40)));
+    const nearEnd = Math.max(0, 1-(thetaEnd-thC)/0.5);      // 燃え口の手前は熱で色が抜ける
+    aC.push(0.85*(1-0.55*nearEnd));
+  }
+  updateRibbon(coil, ptsC, wC, aC);
+  updateRibbon(ash, ptsA, wA, aA);
+  return coilPoint(thetaEnd);
+}
+
+// ---- 風(触れた乱れ) ----
+const gusts = [];
+function gustField(y, t){
+  let dx=0, turb=0;
+  for(const g of gusts){
+    const age = t-g.t0; if(age<0) continue;
+    const yc = g.y + age*0.22;
+    const gauss = Math.exp(-((y-yc)**2)/(2*(KNOBS.gustRadius**2)));
+    const decay = Math.exp(-age/KNOBS.settleSec);
+    const tremble = 1 + KNOBS.trembleAmt*Math.cos(age*4.2)*Math.exp(-age/(KNOBS.settleSec*1.3));
+    dx += g.dir*g.power*gauss*decay*tremble;
+    turb += gauss*decay*KNOBS.turbGust;
+  }
+  return [dx, turb];
+}
+
+// ---- 煙(墨の一筆) ----
+let emberPos=[0,0];
+function smokePoint(s, t, turbEx, phase){
+  const y = emberPos[1] + 0.02 + s*KNOBS.columnH;
+  const breath = 0.5+0.5*Math.sin(t*2*Math.PI/KNOBS.breathSec - 1.2);
+  const amp = KNOBS.swayAmp*Math.pow(s,1.5)*(0.75+0.5*breath);
+  let x = emberPos[0]
+    + amp*(Math.sin(t*0.42 - s*2.6 + phase)*0.6 + Math.sin(t*0.19 - s*1.3 + phase*1.7)*0.4)
+    + KNOBS.meander*s*s*Math.sin(t*0.11 - s*3.1 + phase*0.6 + 1.7)
+    + (n1(s*5 + t*0.3 + phase*13)-0.5)*(KNOBS.turbBase+turbEx)*0.08*s*s;
+  const [gdx] = gustField(y, t);
+  x += gdx*Math.pow(Math.min(1,s*3),1.5);
+  return [x, y];
+}
+function updateSmoke(t, appear){
+  const pts=[], w=[], a=[], ptsW=[], wW=[], aW=[];
+  for(let i=0;i<SMOKE_N;i++){
+    const s=i/(SMOKE_N-1);
+    const y = emberPos[1]+0.02+s*KNOBS.columnH;
+    const [,gturb] = gustField(y,t);
+    const p = smokePoint(s,t,gturb,0);
+    pts.push(p);
+    w.push(KNOBS.threadW*(1+s*2.6)*(0.88+0.24*n1(s*7+t*0.1)));
+    const torn = 1 - Math.min(1,(KNOBS.turbBase*0.35+gturb)*s*s*0.8*n1(s*9-t*0.3));
+    const tip = 1 - ease((s-0.62)/0.33);                    // 先端はふっと空に溶ける
+    a.push(KNOBS.inkAlpha*appear*Math.min(1,s*14)*tip*Math.max(0,torn));
+    // ほつれ(上で分かれるもう一筋)
+    const p2 = smokePoint(s,t,gturb,2.6);
+    ptsW.push([p2[0]+Math.pow(s,1.6)*0.11*Math.sin(t*0.15+2.0), p2[1]]);
+    wW.push(KNOBS.threadW*0.7*(1+s*2.2));
+    aW.push(KNOBS.inkAlpha*0.30*appear*Math.pow(s,1.5)*tip);
+  }
+  updateRibbon(smoke, pts, w, a);
+  updateRibbon(wisp, ptsW, wW, aW);
+  updateRibbon(bleed, pts, w.map(x=>x*3.0), a.map(x=>x/KNOBS.inkAlpha*KNOBS.bleedAlpha));
+  return pts;
+}
+
+// ---- 音(息と爆ぜ) ----
+let actx=null, noiseBuf=null;
+function audioInit(){
+  if(actx) return;
+  actx = new (window.AudioContext||window.webkitAudioContext)();
+  const len = actx.sampleRate*2;
+  noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+}
+function breathSound(y01){
+  if(!actx) return;
+  const src = actx.createBufferSource(); src.buffer=noiseBuf; src.loop=true;
+  const bp = actx.createBiquadFilter(); bp.type='bandpass';
+  const idx = Math.max(0, Math.min(KNOBS.scaleHz.length-1, Math.floor(y01*KNOBS.scaleHz.length)));
+  bp.frequency.value = KNOBS.scaleHz[idx]*2; bp.Q.value = 9;
+  const g = actx.createGain(); g.gain.value=0;
+  src.connect(bp).connect(g).connect(actx.destination);
+  const t=actx.currentTime;
+  g.gain.linearRampToValueAtTime(KNOBS.breathGain, t+0.18);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+1.4);
+  src.start(t); src.stop(t+1.6);
+}
+function crackle(){
+  if(!actx) return;
+  const src=actx.createBufferSource(); src.buffer=noiseBuf;
+  const hp=actx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=3800;
+  const g=actx.createGain();
+  const t=actx.currentTime;
+  g.gain.setValueAtTime(KNOBS.crackleGain,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+0.05);
+  src.connect(hp).connect(g).connect(actx.destination);
+  src.start(t); src.stop(t+0.07);
+}
+
+// ---- 入力 ----
+let lastGust=0, lastPX=null;
+function toWorld(cx,cy){ return [ (cx/innerWidth*2-1)*aspect, -(cy/innerHeight*2-1) ]; }
+let smokePts=[];
+addEventListener('pointerdown', ()=>{ audioInit(); lastPX=null; });
+addEventListener('pointermove', e=>{
+  const [wx,wy]=toWorld(e.clientX,e.clientY);
+  const dx = lastPX===null?0:wx-lastPX; lastPX=wx;
+  if(Math.abs(dx)<0.001) return;
+  // 煙の近くを撫でたときだけ風が生まれる
+  let near=false;
+  for(const p of smokePts){ if(Math.abs(p[1]-wy)<0.05){ if(Math.abs(p[0]-wx)<KNOBS.gustRadius*1.6) near=true; break; } }
+  const now=performance.now()/1000;
+  if(near && now-lastGust>0.09){
+    lastGust=now;
+    gusts.push({y:wy, t0:tNow, dir:Math.sign(dx), power:KNOBS.gustPower*Math.min(1,Math.abs(dx)*22)});
+    if(gusts.length>14) gusts.shift();
+    const y01=(wy-emberPos[1])/KNOBS.columnH;
+    breathSound(Math.max(0,Math.min(1,y01)));
+  }
+});
+
+// ---- 主ループ ----
+const t0 = performance.now();
+let tNow=0, titleShown=false, lastCrackleCycle=-1;
+function ease(x){ return x<=0?0:x>=1?1:x*x*(3-2*x); }
+function loop(){
+  requestAnimationFrame(loop);
+  tNow = (performance.now()-t0)/1000;
+  // 燃え進み(隠喩の芯: この夕暮れは、本当に戻ってこない)
+  thetaEnd = Math.max(0, THETA0*(1 - tNow/(KNOBS.burnMin*60)));
+  const burnLeft = ease(thetaEnd/(THETA0*0.03));            // 燃え尽きの黄昏
+  emberPos = updateCoil();
+  ember.position.set(emberPos[0], emberPos[1], 0);
+  const breath = 0.5+0.5*Math.sin(tNow*2*Math.PI/KNOBS.breathSec - 1.2);
+  const ignite = ease((tNow-KNOBS.tameEmber)/1.6);
+  ember.material.uniforms.uGlow.value = ignite*burnLeft*(0.5+0.5*Math.pow(breath,1.6));
+  // 呼吸の頂点で、ごくたまに爆ぜる
+  const cyc = Math.floor((tNow-1.2)/KNOBS.breathSec);
+  if(actx && cyc!==lastCrackleCycle && breath>0.96){ lastCrackleCycle=cyc; if(hash1(cyc*7)<0.5) crackle(); }
+  const appear = ease((tNow-KNOBS.tameSmoke)/KNOBS.smokeFade)*burnLeft;
+  smokePts = updateSmoke(tNow, appear);
+  for(const m of [smoke,wisp,bleed,coil,ash]) m.material.uniforms.uTime.value=tNow;
+  if(!titleShown && tNow>KNOBS.tameSmoke+KNOBS.smokeFade*0.5){
+    titleShown=true;
+    for(const id of ['title','sub','seal','cap']) document.getElementById(id).style.opacity=1;
+  }
+  renderer.render(scene, camera);
+}
+loop();
+</script>
+</body>
+</html>
