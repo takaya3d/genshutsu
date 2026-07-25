@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>験: 波紋伝播グリッド</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#222}canvas{display:block}</style>
+</head>
+<body>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// 験: 衝撃点からの距離で遅延した減衰振動 = 解析的波紋伝播。クリックで波を打つ。
+import * as THREE from 'three';
+const scene = new THREE.Scene();
+let aspect = innerWidth/innerHeight;
+const cam = new THREE.OrthographicCamera(-aspect, aspect, 1, -1, 0.1, 10); cam.position.z = 1;
+const ren = new THREE.WebGLRenderer({antialias:true}); ren.setSize(innerWidth, innerHeight);
+document.body.appendChild(ren.domElement);
+
+const SIZE = 0.06, COLS = Math.ceil(2*aspect/SIZE)+2, ROWS = Math.ceil(2/SIZE)+2, N = COLS*ROWS;
+const geo = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(SIZE*0.9, SIZE*0.9));
+const pos = new Float32Array(N*2);
+let k=0;
+for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){ pos[k++]=-aspect+c*SIZE; pos[k++]=-1+r*SIZE; }
+geo.setAttribute('aPos', new THREE.InstancedBufferAttribute(pos, 2));
+geo.instanceCount = N;
+
+const MAXI = 16;
+const imp = new Float32Array(MAXI*4).fill(-1e4);
+const mat = new THREE.ShaderMaterial({
+  uniforms:{ uTime:{value:0}, uImp:{value:imp} },
+  vertexShader:`
+    attribute vec2 aPos; uniform float uTime; uniform vec4 uImp[${MAXI}];
+    varying float vDisp;
+    void main(){
+      float disp = 0.0;
+      for(int i=0;i<${MAXI};i++){
+        float d = distance(aPos, uImp[i].xy);
+        float tt = uTime - uImp[i].z - d/1.1;               // c = 1.1 world/s
+        if(tt > 0.0) disp += uImp[i].w * exp(-tt*2.6) * sin(tt*18.0) * exp(-d*1.4);
+      }
+      vDisp = disp;
+      vec3 p = position + vec3(aPos, 0.0) + vec3(0.0, 0.0, 0.0);
+      p.xy += normalize(position.xy + 1e-6) * disp * 0.02;  // 波でわずかに膨らむ
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+    }`,
+  fragmentShader:`
+    varying float vDisp;
+    void main(){ gl_FragColor = vec4(vec3(0.35 + vDisp*2.2), 1.0); }`
+});
+scene.add(new THREE.Mesh(geo, mat));
+
+let slot = 0;
+addEventListener('pointerdown', e=>{
+  const x=(e.clientX/innerWidth*2-1)*aspect, y=-(e.clientY/innerHeight*2-1);
+  imp.set([x, y, tNow, 0.16], (slot++%MAXI)*4);
+});
+let tNow=0; const t0=performance.now();
+(function loop(){ requestAnimationFrame(loop); tNow=(performance.now()-t0)/1000; mat.uniforms.uTime.value=tNow; ren.render(scene,cam); })();
+</script>
+</body>
+</html>
