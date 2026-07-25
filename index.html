@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>現出 — genshutsu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500&family=EB+Garamond:ital@1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sumi: #1a1a1a;
+    --kinari: #f2ede3;
+    --ai: #234794;
+    --hi: #c73e3a;
+    --kin: #c8a44d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--sumi);
+    color: var(--kinari);
+    font-family: 'Shippori Mincho', serif;
+    min-height: 100vh;
+    padding: 18vh 8vw 12vh;
+  }
+  h1 {
+    font-size: 1.6rem;
+    font-weight: 500;
+    letter-spacing: 0.5em;
+    margin-bottom: 0.8em;
+  }
+  .sub {
+    font-family: 'EB Garamond', serif;
+    font-style: italic;
+    font-size: 0.85rem;
+    color: color-mix(in srgb, var(--kinari) 45%, transparent);
+    margin-bottom: 6em;
+  }
+  ol { list-style: none; }
+  ol li { margin-bottom: 1.6em; }
+  ol a {
+    color: var(--kinari);
+    text-decoration: none;
+    border-bottom: 1px solid color-mix(in srgb, var(--kin) 40%, transparent);
+    padding-bottom: 2px;
+    transition: border-color 1.2s ease;
+  }
+  ol a:hover { border-color: var(--kin); }
+  .date {
+    font-family: 'EB Garamond', serif;
+    font-size: 0.8rem;
+    color: color-mix(in srgb, var(--kinari) 40%, transparent);
+    margin-right: 1.5em;
+  }
+</style>
+</head>
+<body>
+  <h1>現出</h1>
+  <p class="sub">genshutsu — sketches that calm when touched</p>
+  <ol id="list" reversed>
+    <!-- 工場がここへ1行ずつ追記する。新しいものを上に。
+         書式: <li><span class="date">YYYY-MM-DD</span><a href="sketches/ファイル名.html">題名</a></li> -->
+  </ol>
+</body>
+</html>
