@@ -9,11 +9,17 @@ Claude Codeが0→1でWebGLスケッチを量産し、貴優が1→10に仕上�
 |---|---|
 | `CLAUDE.md` | 憲法。工場の全ルール |
 | `AESTHETICS.md` | 美学の掟。**赤入れはここに追記** |
+| `RESEARCH.md` | 自律学習プロトコル(工場の学び方のルール) |
+| `INBOX.md` | 受信箱。**気になったURLはここに貼る** |
 | `ledger.md` | 台帳。水揚げの記録。レビューしたら行末に `[済]` |
 | `index.html` | ギャラリー(GitHub Pagesの入口) |
 | `run_factory.sh` | 常時稼働ランナー |
 | `orders/` | 発注書(`ORDER-*.md`)。特注案件の指示書置き場 |
 | `sketches/` | 水揚げ。日々の単一HTMLスケッチ+発注案件のサブフォルダ |
+| `sketches/験/` | 技法カードの最小再実装(習作) |
+| `cards/` | 技法カード。学んだ技法が1枚ずつ溜まる |
+| `research/` | リサーチ成果。暦×トレンドマップなど |
+| `reports/` | 週報。工場の頭の中の要約 |
 | `textures/brush/` | 筆スキャンの差し替え口 |
 | `tools/blender/` | Blender側スクリプト(GPストローク→JSON等) |
 | `factory.log` | 工場ログ(gitには入らない) |
