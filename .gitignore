@@ -1,3 +1,5 @@
 factory.log
 STOP
 .DS_Store
+node_modules/
+dist/
