@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>線香花火 — 大暑 夏の夜</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500&family=EB+Garamond:ital@1&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#111319;touch-action:none;overscroll-behavior:none}
+  canvas{display:block}
+  #frame{position:fixed; inset:16px; border:1px solid rgba(235,228,214,0.16); pointer-events:none;}
+  #tanzakuL{
+    position:fixed; top:8vh; right:8vw; padding:2.2vmin 1.4vmin 3vmin;
+    background:rgba(240,235,221,0.90); border:1px solid rgba(62,52,40,0.14);
+    box-shadow:0 1px 6px rgba(5,6,10,0.25);
+    opacity:0; transition:opacity 3.5s ease; user-select:none; pointer-events:none;
+  }
+  #tanzakuL .inner{display:flex; flex-direction:row-reverse;}
+  #title{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif; font-weight:500;
+    font-size:clamp(24px,4.2vmin,40px); letter-spacing:0.42em; color:#33302b;
+  }
+  #sub{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif;
+    font-size:clamp(9px,1.4vmin,12px); letter-spacing:0.42em; color:rgba(51,48,43,0.55);
+    margin-right:1.1em; padding-top:0.4em;
+  }
+  #seal{
+    position:fixed; right:calc(8vw + 1vmin); top:calc(8vh + 42vmin);
+    width:clamp(20px,3vmin,28px); height:clamp(20px,3vmin,28px);
+    background:#b8432f; color:#ede6d3; border-radius:2px;
+    font-family:'Shippori Mincho',serif; font-size:clamp(12px,1.9vmin,17px);
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; transition:opacity 3.5s ease 2.2s; user-select:none; pointer-events:none;
+  }
+  #cap{
+    position:fixed; bottom:6.5vh; left:8vw;
+    font-family:'EB Garamond',serif; font-style:italic;
+    font-size:clamp(10px,1.5vmin,13px); letter-spacing:0.08em; color:rgba(235,228,214,0.38);
+    opacity:0; transition:opacity 3.5s ease 1.6s; user-select:none; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="frame"></div>
+<div id="tanzakuL"><div class="inner"><div id="title">線香花火</div><div id="sub">大暑 夏の夜</div></div></div>
+<div id="seal">花</div>
+<div id="cap">senk&#333; hanabi &mdash; a sheltered flame lives a little longer</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// ==== 貴優ノブ ====
+const KNOBS = {
+  // --- 一生の設計 ---
+  lifeSec:     46,    // これを上げると、一本の寿命が延びる(秒)
+  tameLight:   2.2,   // これを上げると、点火までの「ため」が長くなる(秒)
+  relightSec:  5.0,   // これを上げると、落花から次の一本までの喪の時間が延びる(秒)
+  shelterSlow: 0.55,  // これを下げると、手で守っている間さらにゆっくり燃える(寿命の伸び)
+  // --- 相図(寿命位置0..1) 蕾→牡丹→松葉→柳→散り菊 ---
+  phases:      [0.06, 0.30, 0.62, 0.82],  // 各相の境目。いじると一生の配分が変わる
+  // --- 火花の設計 ---
+  emitBotan:   7,     // これを上げると、牡丹のぽつぽつが増える(毎秒)
+  emitMatsuba: 150,   // これを上げると、松葉の勢いが増す(毎秒)
+  emitYanagi:  34,    // これを上げると、柳のしだれが濃くなる(毎秒)
+  emitKiku:    5,     // これを上げると、散り菊のまたたきが増える(毎秒)
+  sparkSpeed:  0.78,  // これを上げると、火花が遠くまで飛ぶ
+  branchP:     0.65,  // これを上げると、松葉の枝分かれが増える
+  gravity:     0.5,   // これを上げると、火花が早く垂れる
+  trailFade:   0.065, // これを下げると、残像(軌跡)が長く尾を引く
+  // --- 風と手 ---
+  gustPower:   0.9,   // これを上げると、撫でた風が強くなる(火球が落ちやすくなる)
+  dropRisk:    0.5,   // これを上げると、晩年の強風で火球が落ちやすくなる
+  shelterR:    0.34,  // これを上げると、手のひらの守りが届く範囲が広がる
+  // --- 音の設計 ---
+  fizzGain:    0.05,  // これを上げると、松葉の「しゅわ」が大きくなる
+  popGain:     0.09,  // これを上げると、ぽつぽつの爆ぜが大きくなる
+  muteBeat:    0.7,   // これを上げると、落花の瞬間の「無音の一拍」が長くなる(秒)
+};
+// ==================
+
+import * as THREE from 'three';
+
+let aspect = innerWidth/innerHeight;
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-aspect, aspect, 1, -1, 0.1, 10);
+camera.position.z = 1;
+const renderer = new THREE.WebGLRenderer({antialias:false});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.autoClear = false;
+document.body.appendChild(renderer.domElement);
+
+// ---- 残像法: 夜の色で薄く塗り重ねる(ビネット焼き込み) ----
+const fadeScene = new THREE.Scene();
+const fade = new THREE.Mesh(new THREE.PlaneGeometry(2,2), new THREE.ShaderMaterial({
+  transparent:true, depthTest:false, depthWrite:false,
+  uniforms:{ uRes:{value:new THREE.Vector2(1,1)}, uA:{value:KNOBS.trailFade} },
+  vertexShader:`void main(){ gl_Position=vec4(position.xy,0.0,1.0); }`,
+  fragmentShader:`
+    precision highp float;
+    uniform vec2 uRes; uniform float uA;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+    void main(){
+      vec2 uv = gl_FragCoord.xy/uRes;
+      vec3 night = mix(vec3(0.078,0.086,0.115), vec3(0.045,0.05,0.07),
+                       smoothstep(0.25, 1.0, distance(uv*vec2(uRes.x/uRes.y,1.0), vec2(0.5*uRes.x/uRes.y,0.42))));
+      night *= 0.985 + 0.03*h(uv*vec2(311.0,97.0));   // 紙肌のざらつき
+      gl_FragColor = vec4(night, uA);
+    }`
+}));
+fade.frustumCulled = false;
+fadeScene.add(fade);
+
+// ---- こより(紙縒り)と火球 ----
+const koyoriGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3(),new THREE.Vector3(),new THREE.Vector3()]);
+const koyori = new THREE.Line(koyoriGeo, new THREE.LineBasicMaterial({color:0xcfc5b2, transparent:true, opacity:0.75}));
+koyori.renderOrder = 1; koyori.frustumCulled = false;
+scene.add(koyori);
+
+const ball = new THREE.Mesh(new THREE.PlaneGeometry(0.2,0.2), new THREE.ShaderMaterial({
+  transparent:true, blending:THREE.AdditiveBlending, depthTest:false, depthWrite:false,
+  uniforms:{ uGlow:{value:0}, uFlick:{value:0} },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    uniform float uGlow, uFlick; varying vec2 vUv;
+    void main(){
+      float d = length(vUv-0.5)*2.0;
+      float core = smoothstep(0.16+uFlick*0.05, 0.0, d);
+      float halo = smoothstep(0.9, 0.0, d);
+      vec3 col = mix(vec3(1.0,0.44,0.10), vec3(1.0,0.9,0.72), core);
+      gl_FragColor = vec4(col, uGlow*(core*0.9 + halo*halo*0.30));
+    }`
+}));
+ball.renderOrder = 3; ball.frustumCulled = false;
+scene.add(ball);
+
+// ---- 火花プール(線分描画: 前位置→現位置の針) ----
+const N = 3600;
+const pos = new Float32Array(N*2*3), heat = new Float32Array(N*2);
+const pool = []; for(let i=0;i<N;i++) pool.push({on:false});
+const pgeo = new THREE.BufferGeometry();
+pgeo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+pgeo.setAttribute('aHeat', new THREE.BufferAttribute(heat,1));
+const points = new THREE.LineSegments(pgeo, new THREE.ShaderMaterial({
+  transparent:true, blending:THREE.AdditiveBlending, depthTest:false, depthWrite:false,
+  vertexShader:`
+    attribute float aHeat; varying float vH;
+    void main(){ vH=aHeat; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    varying float vH;
+    void main(){
+      vec3 c = mix(vec3(0.85,0.30,0.08), mix(vec3(1.0,0.62,0.18), vec3(1.0,0.95,0.80), smoothstep(0.5,1.0,vH)), smoothstep(0.0,0.5,vH));
+      gl_FragColor = vec4(c, vH);
+    }`
+}));
+points.renderOrder = 2; points.frustumCulled = false;
+scene.add(points);
+
+function spawn(x,y,vx,vy,life,gen,size){
+  for(const p of pool){ if(p.on) continue;
+    Object.assign(p,{on:true,x,y,px:x,py:y,vx,vy,age:0,life,gen,size,
+      branchAt:(gen<2 && Math.random()<KNOBS.branchP) ? life*(0.30+Math.random()*0.40) : -1});
+    return p;
+  }
+}
+
+// ---- 相図: 一生のかたち ----
+function phaseParams(u){
+  const [a,b,c,d] = KNOBS.phases;
+  if(u<a)  return {name:'tsubomi', emit:1.5, spd:0.14, life:0.35, branch:0, size:2.2, fizz:0.04, pop:0.6};
+  if(u<b)  return {name:'botan',  emit:KNOBS.emitBotan, spd:0.42, life:0.9, branch:0.12, size:3.4, fizz:0.12, pop:2.6};
+  if(u<c)  return {name:'matsuba',emit:KNOBS.emitMatsuba, spd:KNOBS.sparkSpeed*1.25, life:0.75, branch:1, size:3.2, fizz:1.0, pop:5.5};
+  if(u<d)  return {name:'yanagi', emit:KNOBS.emitYanagi, spd:KNOBS.sparkSpeed*0.7, life:1.1, branch:0.35, size:2.4, fizz:0.45, pop:1.6};
+  return   {name:'chirigiku', emit:KNOBS.emitKiku, spd:0.30, life:0.55, branch:0, size:2.6, fizz:0.10, pop:1.0};
+}
+
+// ---- 音 ----
+let actx=null, fizzGainNode=null, noiseBuf=null;
+function audioInit(){
+  if(actx) return;
+  actx = new (window.AudioContext||window.webkitAudioContext)();
+  const len=actx.sampleRate, buf=actx.createBuffer(1,len,actx.sampleRate), dd=buf.getChannelData(0);
+  for(let i=0;i<len;i++) dd[i]=Math.random()*2-1;
+  noiseBuf = buf;
+  const src=actx.createBufferSource(); src.buffer=buf; src.loop=true;
+  const bp=actx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=5200; bp.Q.value=0.8;
+  fizzGainNode=actx.createGain(); fizzGainNode.gain.value=0;
+  src.connect(bp).connect(fizzGainNode).connect(actx.destination);
+  src.start();
+}
+function pop(vol){
+  if(!actx) return;
+  const s=actx.createBufferSource(); s.buffer=noiseBuf;
+  const bp=actx.createBiquadFilter(); bp.type='bandpass';
+  bp.frequency.value=2800+Math.random()*3600; bp.Q.value=3;
+  const g=actx.createGain(); const t=actx.currentTime;
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+0.03+Math.random()*0.03);
+  s.connect(bp).connect(g).connect(actx.destination);
+  s.start(t, Math.random()); s.stop(t+0.08);
+}
+
+// ---- 状態 ----
+let state='mae';          // mae(点火前のため) / moe(燃えている) / ochi(落花) / ma(喪の間)
+let u=0, lifeT=KNOBS.lifeSec, stateT0=0;
+let ballP=[0,0], ballV=[0,0], sheltered=false, muteUntil=0;
+const gusts=[];
+let pointerW=[10,10], pointerDown=false;
+
+function hash1(i){ const s=Math.sin(i*127.1)*43758.5453; return s-Math.floor(s); }
+function n1(x){ const i=Math.floor(x), f=x-i, uu=f*f*(3-2*f); return hash1(i)*(1-uu)+hash1(i+1)*uu; }
+function windAt(t){
+  let W=(n1(t*0.2)-0.5)*0.06;
+  for(const g of gusts){ const age=t-g.t0; if(age>=0) W += g.dir*g.power*Math.exp(-age/1.1); }
+  return W;
+}
+function anchor(){ return [0.0, 0.90]; }   // こよりの持ち手(上端)
+function relight(){
+  state='moe'; u=0; stateT0=tNow;
+  lifeT = KNOBS.lifeSec*(0.85+hash1(tNow*13|0)*0.3);
+  ballV=[0,0];
+}
+
+// ---- 入力 ----
+function toWorld(cx,cy){ return [ (cx/innerWidth*2-1)*aspect, -(cy/innerHeight*2-1) ]; }
+let lastPX=null, lastGust=0;
+addEventListener('pointerdown', e=>{
+  audioInit();
+  pointerDown=true; pointerW=toWorld(e.clientX,e.clientY); lastPX=null;
+  if(state==='ma') relight();               // 喪の間に触れたら、次の一本を灯す
+});
+addEventListener('pointerup', ()=>{ pointerDown=false; });
+addEventListener('pointermove', e=>{
+  pointerW=toWorld(e.clientX,e.clientY);
+  if(e.pointerType==='mouse' && e.buttons===0) return;
+  const dx = lastPX===null?0:pointerW[0]-lastPX; lastPX=pointerW[0];
+  if(Math.abs(dx)<0.003 || tNow-lastGust<0.1) return;
+  // 手のひらの中で撫でても風は起きない(守りは静か)
+  if(Math.hypot(pointerW[0]-ballP[0], pointerW[1]-ballP[1]) < KNOBS.shelterR) return;
+  lastGust=tNow;
+  gusts.push({t0:tNow, dir:Math.sign(dx), power:Math.min(1,Math.abs(dx)*14)*KNOBS.gustPower});
+  if(gusts.length>10) gusts.shift();
+});
+
+// ---- 主ループ ----
+const t0=performance.now();
+let tNow=0, tPrev=0, titleShown=false, emitAcc=0, popAcc=0;
+renderer.setClearColor(0x0d0f16, 1); renderer.clear();
+function loop(){
+  requestAnimationFrame(loop);
+  tNow=(performance.now()-t0)/1000;
+  const dt=Math.min(0.033, tNow-tPrev||0.016); tPrev=tNow;
+  const W=windAt(tNow);
+  const an=anchor();
+
+  if(state==='mae' && tNow>KNOBS.tameLight) relight();
+
+  let pp={name:'', emit:0, spd:0, life:0, branch:0, size:2, fizz:0, pop:0};
+  if(state==='moe'){
+    sheltered = pointerDown && Math.hypot(pointerW[0]-ballP[0], pointerW[1]-ballP[1]) < KNOBS.shelterR;
+    u += dt/lifeT * (sheltered ? KNOBS.shelterSlow : 1);
+    pp = phaseParams(u);
+    // 火球: こよりの先で揺れる
+    const sway = W*0.35 + (n1(tNow*1.7)-0.5)*0.02;
+    ballP=[an[0]+sway, an[1]-0.52];
+    // 晩年の強風は命取り
+    const gustNow = Math.abs(W);
+    if(u>0.5 && gustNow>0.42 && !sheltered && hash1((tNow*7)|0) < KNOBS.dropRisk*dt*6) dropBall();
+    if(u>=1) dropBall();
+  } else if(state==='ochi'){
+    ballV[1]-=1.3*dt; ballP[0]+=ballV[0]*dt; ballP[1]+=ballV[1]*dt;
+    if(ballP[1]<-1.15 && tNow-stateT0>1.2){ state='ma'; stateT0=tNow; }
+  } else if(state==='ma'){
+    if(tNow-stateT0>KNOBS.relightSec) relight();
+  }
+
+  // ---- 放出 ----
+  if(state==='moe' && u>0.01){
+    emitAcc += pp.emit*dt*(sheltered?0.7:1);
+    while(emitAcc>=1){
+      emitAcc-=1;
+      const a=Math.random()*6.283, up=Math.abs(Math.sin(a));
+      const s=pp.spd*(0.5+Math.random()*0.9);
+      spawn(ballP[0], ballP[1],
+        Math.cos(a)*s + W*0.4,
+        Math.sin(a)*s*(pp.name==='yanagi'? 0.35 : 1) + (pp.name==='matsuba'? up*0.12: 0),
+        pp.life*(0.6+Math.random()*0.8), pp.branch>=1?0:1, pp.size);
+    }
+    popAcc += pp.pop*dt;
+    while(popAcc>=1){ popAcc-=1; if(actx && tNow>muteUntil) pop(KNOBS.popGain*(0.5+Math.random()*0.8)); }
+  }
+
+  // ---- 粒子更新 ----
+  let k=0;
+  for(const p of pool){
+    if(!p.on) continue;
+    p.age+=dt;
+    if(p.age>=p.life){ p.on=false; continue; }
+    if(p.branchAt>0 && p.age>=p.branchAt){
+      p.branchAt=-1;
+      const nb=2+(Math.random()*3|0);
+      for(let j=0;j<nb;j++){
+        const r=(Math.random()-0.5)*1.7, c=Math.cos(r), sn=Math.sin(r);
+        spawn(p.x,p.y,(p.vx*c-p.vy*sn)*0.72,(p.vx*sn+p.vy*c)*0.72, p.life*0.45, p.gen+1, p.size*0.85);
+      }
+      p.life*=0.8;
+    }
+    p.vy -= KNOBS.gravity*dt;
+    p.vx += W*0.25*dt;
+    p.vx *= 1-0.35*dt; p.vy *= 1-0.2*dt;
+    p.px=p.x; p.py=p.y;
+    p.x += p.vx*dt; p.y += p.vy*dt;
+    if(k<N){
+      const tw = (pp.name==='chirigiku' ? (0.4+0.7*n1(tNow*13+p.x*40)) : 1);
+      const hh = Math.max(0,1-p.age/p.life)*tw;
+      pos[k*6]=p.px; pos[k*6+1]=p.py; pos[k*6+2]=0;
+      pos[k*6+3]=p.x; pos[k*6+4]=p.y; pos[k*6+5]=0;
+      heat[k*2]=hh*0.8; heat[k*2+1]=hh;
+      k++; }
+  }
+  for(let i=k;i<N;i++){ pos[i*6]=1e4; pos[i*6+3]=1e4; heat[i*2]=0; heat[i*2+1]=0; }
+  pgeo.attributes.position.needsUpdate=true;
+  pgeo.attributes.aHeat.needsUpdate=true;
+
+  // ---- こよりと火球の見た目 ----
+  const tip=[ballP[0], ballP[1]+0.03];
+  const mid1=[an[0]+(tip[0]-an[0])*0.35+W*0.01, an[1]+(tip[1]-an[1])*0.33];
+  const mid2=[an[0]+(tip[0]-an[0])*0.7+W*0.02,  an[1]+(tip[1]-an[1])*0.66];
+  koyoriGeo.setFromPoints([
+    new THREE.Vector3(an[0],an[1],0), new THREE.Vector3(mid1[0],mid1[1],0),
+    new THREE.Vector3(mid2[0],mid2[1],0), new THREE.Vector3(tip[0],tip[1],0)
+  ]);
+  koyori.visible = state!=='ma';
+  const alive = state==='moe';
+  const flick = n1(tNow*22);
+  ball.position.set(ballP[0], ballP[1], 0);
+  ball.material.uniforms.uGlow.value =
+    alive ? (0.55+0.45*flick)*(sheltered?0.85:1) :
+    state==='ochi' ? Math.max(0, 1-(tNow-stateT0)*0.9) : 0;
+  ball.material.uniforms.uFlick.value = flick;
+
+  // ---- 音 ----
+  if(fizzGainNode){
+    const target = (alive && tNow>muteUntil) ? pp.fizz*KNOBS.fizzGain*(sheltered?0.6:1) : 0;
+    fizzGainNode.gain.setTargetAtTime(target, actx.currentTime, 0.12);
+  }
+
+  if(!titleShown && tNow>KNOBS.tameLight+2){
+    titleShown=true;
+    for(const id of ['tanzakuL','seal','cap']) document.getElementById(id).style.opacity=1;
+  }
+  renderer.render(fadeScene, camera);
+  renderer.render(scene, camera);
+}
+function dropBall(){
+  state='ochi'; stateT0=tNow;
+  ballV=[windAt(tNow)*0.3, -0.05];
+  muteUntil = tNow + KNOBS.muteBeat;        // 落ちる瞬間、音が一拍止まる
+}
+function layout(){
+  aspect=innerWidth/innerHeight;
+  camera.left=-aspect; camera.right=aspect; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  const pr=renderer.getPixelRatio();
+  fade.material.uniforms.uRes.value.set(innerWidth*pr, innerHeight*pr);
+  renderer.clear();
+}
+layout();
+addEventListener('resize', layout);
+loop();
+</script>
+</body>
+</html>
