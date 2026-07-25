@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>風鈴 — 大暑 桐始結花</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500&family=EB+Garamond:ital@1&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#e6e9e2;touch-action:none;overscroll-behavior:none}
+  canvas{display:block}
+  #frame{position:fixed; inset:16px; border:1px solid rgba(62,52,40,0.18); pointer-events:none;}
+  #tanzakuL{
+    position:fixed; top:14vh; right:8vw; padding:2.2vmin 1.4vmin 3vmin;
+    background:rgba(240,235,221,0.92); border:1px solid rgba(62,52,40,0.14);
+    box-shadow:0 1px 6px rgba(30,25,18,0.10);
+    opacity:0; transition:opacity 3.5s ease; user-select:none; pointer-events:none;
+  }
+  #tanzakuL .inner{display:flex; flex-direction:row-reverse;}
+  #title{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif; font-weight:500;
+    font-size:clamp(28px,5vmin,48px); letter-spacing:0.6em; color:#33302b;
+  }
+  #sub{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif;
+    font-size:clamp(9px,1.4vmin,12px); letter-spacing:0.42em; color:rgba(51,48,43,0.55);
+    margin-right:1.1em; padding-top:0.4em;
+  }
+  #seal{
+    position:fixed; right:calc(8vw + 1vmin); top:calc(14vh + 38vmin);
+    width:clamp(20px,3vmin,28px); height:clamp(20px,3vmin,28px);
+    background:#b8432f; color:#ede6d3; border-radius:2px;
+    font-family:'Shippori Mincho',serif; font-size:clamp(12px,1.9vmin,17px);
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; transition:opacity 3.5s ease 2.2s; user-select:none; pointer-events:none;
+  }
+  #cap{
+    position:fixed; bottom:6.5vh; left:8vw;
+    font-family:'EB Garamond',serif; font-style:italic;
+    font-size:clamp(10px,1.5vmin,13px); letter-spacing:0.08em; color:rgba(51,48,43,0.42);
+    opacity:0; transition:opacity 3.5s ease 1.6s; user-select:none; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="frame"></div>
+<div id="tanzakuL"><div class="inner"><div id="title">風鈴</div><div id="sub">大暑 初候 桐始結花</div></div></div>
+<div id="seal">鈴</div>
+<div id="cap">f&#363;rin &mdash; what the wind leaves behind</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// ==== 貴優ノブ ====
+const KNOBS = {
+  // --- 間(ま)の設計 ---
+  tameTitle:   2.8,   // これを上げると、短冊(題)が現れるまでの「ため」が長くなる(秒)
+  ghostSec:    24,    // これを上げると、見えない風が通るまでの静けさが長く要る(秒)
+  ghostPower:  0.5,   // これを上げると、見えない風がすこし強くなる(1回だけ鳴るくらいが品)
+  // --- 風の設計 ---
+  windBase:    0.10,  // これを上げると、常の微風が強くなる(鳴らない程度が品)
+  gustPower:   1.1,   // これを上げると、ひと撫でで起きる風が強くなる
+  gustDecay:   1.3,   // これを上げると、起こした風が長く残る(秒)
+  // --- 鈴と短冊の物理 ---
+  omegaTan:    6.0,   // これを上げると、短冊の揺れが速くなる
+  dampTan:     0.55,  // これを上げると、短冊が早く鎮まる(ためらいが減る)
+  omegaBell:   3.0,   // これを上げると、鈴本体の揺り戻しが速くなる
+  dampBell:    1.1,   // これを上げると、鈴本体が早く静止する
+  strikeAng:   0.30,  // これを上げると、強く振れないと鳴らなくなる(rad)
+  // --- 鈴の声(非整数次倍音のモーダル合成。三鈴は実は和音) ---
+  f0s:         [1174.7, 1318.5, 1568.0], // 三つの鈴の基音(D6 E6 G6)
+  ratios:      [1, 2.32, 3.85, 5.11, 6.4], // 部分音の非整数次比(ガラスの声)
+  decays:      [3.4, 2.1, 1.1, 0.6, 0.35], // 各部分音の余韻(秒)
+  ringGain:    0.14,  // これを上げると、鈴の音が大きくなる
+  minGap:      0.13,  // これを上げると、連打が抑えられて品が保たれる(秒)
+  // --- 姿 ---
+  bellXs:      [-0.52, 0.04, 0.56],  // 三鈴の吊り位置(aspect比)
+  ropeLs:      [0.30, 0.44, 0.36],   // 吊り紐の長さ
+  bellRs:      [0.072, 0.088, 0.079],// 鈴の大きさ
+  tanChars:    ['涼','風','音'],      // 短冊に書く字
+};
+// ==================
+
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+let aspect = innerWidth/innerHeight;
+const camera = new THREE.OrthographicCamera(-aspect, aspect, 1, -1, 0.1, 10);
+camera.position.z = 1;
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+// ---- 空(夏の午後の白) ----
+const sky = new THREE.Mesh(new THREE.PlaneGeometry(2,2), new THREE.ShaderMaterial({
+  depthTest:false, depthWrite:false,
+  uniforms:{ uRes:{value:new THREE.Vector2(1,1)}, uTime:{value:0} },
+  vertexShader:`void main(){ gl_Position = vec4(position.xy, 0.9999, 1.0); }`,
+  fragmentShader:`
+    precision highp float;
+    uniform vec2 uRes; uniform float uTime;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+    float n2(vec2 p){
+      vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+      return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y);
+    }
+    void main(){
+      vec2 uv = gl_FragCoord.xy/uRes;
+      vec3 top = vec3(0.72,0.82,0.86), bot = vec3(0.95,0.93,0.87);
+      vec3 col = mix(bot, top, smoothstep(0.15, 0.95, uv.y));
+      // 高い薄雲がゆっくり流れる
+      float cl = n2(uv*vec2(3.0,6.0) + vec2(uTime*0.008, 0.0));
+      col = mix(col, vec3(0.97,0.96,0.93), smoothstep(0.62,0.9,cl)*0.35*smoothstep(0.4,0.9,uv.y));
+      // 左上のひかり
+      col += vec3(0.10,0.09,0.06)*smoothstep(0.9,0.0,distance(uv*vec2(uRes.x/uRes.y,1.0), vec2(0.16*uRes.x/uRes.y,0.93)));
+      col *= 0.985 + 0.03*n2(uv*vec2(300.0,80.0));   // 紙肌
+      gl_FragColor = vec4(col, 1.0);
+    }`
+}));
+sky.renderOrder = -1; sky.frustumCulled = false;
+scene.add(sky);
+
+// ---- 軒(のき) ----
+const beam = new THREE.Mesh(new THREE.PlaneGeometry(1,1), new THREE.ShaderMaterial({
+  uniforms:{ uT:{value:0} },
+  vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    varying vec2 vUv;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+    float n2(vec2 p){
+      vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+      return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y);
+    }
+    void main(){
+      vec3 col = vec3(0.207,0.165,0.130);
+      col *= 0.9 + 0.2*n2(vUv*vec2(60.0,3.0));          // 木目
+      col *= 1.0 - 0.35*smoothstep(0.25,0.0,vUv.y);     // 下端の影
+      gl_FragColor = vec4(col, 1.0);
+    }`
+}));
+beam.frustumCulled = false;
+scene.add(beam);
+
+// ---- 風鈴の部品 ----
+function glassMaterial(){
+  return new THREE.ShaderMaterial({
+    transparent:true, depthTest:false, depthWrite:false,
+    uniforms:{ uJig:{value:0} },
+    vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader:`
+      precision highp float;
+      uniform float uJig; varying vec2 vUv;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+      float n2(vec2 p){
+        vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y);
+      }
+      void main(){
+        vec2 c = (vUv-vec2(0.5,0.54))*vec2(2.0,2.2);
+        float r = length(c);
+        // 底をわずかに欠いた玉(江戸風鈴の口)
+        if(r > 1.0 || vUv.y < 0.07) discard;
+        float mouth = smoothstep(0.07, 0.13, vUv.y);
+        // ガラス: 中は透き、縁で厚くなる
+        float rim = smoothstep(0.55, 0.98, r);
+        float alpha = (0.16 + 0.5*rim) * mouth;
+        vec3 glass = mix(vec3(0.90,0.95,0.97), vec3(0.72,0.84,0.90), rim);
+        // 左上のハイライト
+        float hi = smoothstep(0.35, 0.0, distance(vUv, vec2(0.36,0.66)));
+        glass += vec3(1.0)*hi*0.35;
+        // 緋の筆(口もとにひと刷毛)
+        float stripe = smoothstep(0.20,0.17,vUv.y)*smoothstep(0.08,0.11,vUv.y);
+        float kasure = 0.6+0.4*n2(vUv*vec2(26.0,8.0));
+        glass = mix(glass, vec3(0.72,0.26,0.18), stripe*0.85*kasure);
+        alpha = max(alpha, stripe*0.75*kasure*mouth);
+        gl_FragColor = vec4(glass, alpha + uJig*0.15);
+      }`
+  });
+}
+function tanzakuTexture(ch){
+  const cv = document.createElement('canvas'); cv.width=96; cv.height=320;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#f4efe1'; ctx.fillRect(0,0,96,320);
+  ctx.strokeStyle = 'rgba(62,52,40,0.25)'; ctx.strokeRect(1,1,94,318);
+  ctx.fillStyle = '#3a362f';
+  ctx.font = '64px "Shippori Mincho", serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(ch, 48, 130);
+  const tx = new THREE.CanvasTexture(cv);
+  tx.colorSpace = THREE.SRGBColorSpace;
+  return tx;
+}
+
+const bells = KNOBS.bellXs.map((bx, i)=>{
+  const R = KNOBS.bellRs[i];
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(R*2, R*2), glassMaterial());
+  glass.renderOrder = 3;
+  const rope = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+    new THREE.LineBasicMaterial({color:0x4a4238, transparent:true, opacity:0.8})
+  );
+  const clapper = new THREE.Mesh(new THREE.CircleGeometry(R*0.10, 12),
+    new THREE.MeshBasicMaterial({color:0x5a4632, transparent:true, opacity:0.9}));
+  clapper.renderOrder = 2;
+  const tanGeo = new THREE.PlaneGeometry(R*0.72, R*2.5);
+  tanGeo.translate(0, -R*1.25, 0);
+  const tan = new THREE.Mesh(tanGeo, new THREE.MeshBasicMaterial({
+    map: tanzakuTexture(KNOBS.tanChars[i]), transparent:true, opacity:0.96
+  }));
+  tan.renderOrder = 2;
+  scene.add(rope, tan, clapper, glass);
+  return {
+    i, R, rope, glass, clapper, tan,
+    a1:0, w1:0, a2:0, w2:0,             // 鈴の揺れ / 短冊の揺れ
+    rnd: Math.abs(Math.sin(i*127.1+3)),
+    lastRing: -10, jig: 0, grabbed: false,
+  };
+});
+
+function layout(){
+  aspect = innerWidth/innerHeight;
+  camera.left=-aspect; camera.right=aspect; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  const pr = renderer.getPixelRatio();
+  sky.material.uniforms.uRes.value.set(innerWidth*pr, innerHeight*pr);
+  beam.scale.set(2*aspect+0.1, 0.16, 1);
+  beam.position.set(0, 0.94, 0);
+}
+layout();
+addEventListener('resize', layout);
+
+// ---- 音(モーダル合成) ----
+let actx=null;
+function audioInit(){ if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)(); }
+function ring(bell, vel){
+  if(!actx) return;
+  const t = actx.currentTime, f0 = KNOBS.f0s[bell.i];
+  const pan = actx.createStereoPanner ? actx.createStereoPanner() : null;
+  const out = pan || actx.createGain();
+  if(pan) pan.pan.value = Math.max(-0.8, Math.min(0.8, KNOBS.bellXs[bell.i]*0.8));
+  out.connect(actx.destination);
+  const g = Math.min(1, vel*1.3) * KNOBS.ringGain;
+  KNOBS.ratios.forEach((r,k)=>{
+    const o = actx.createOscillator(); o.type='sine';
+    o.frequency.value = f0*r*(1+(Math.sin(bell.i*7+k*13)*0.003));
+    const gn = actx.createGain();
+    gn.gain.setValueAtTime(0, t);
+    gn.gain.linearRampToValueAtTime(g*[1,0.5,0.28,0.16,0.09][k], t+0.004);
+    gn.gain.exponentialRampToValueAtTime(0.0001, t+KNOBS.decays[k]);
+    o.connect(gn).connect(out);
+    o.start(t); o.stop(t+KNOBS.decays[k]+0.1);
+  });
+  const len=actx.sampleRate*0.05|0, buf=actx.createBuffer(1,len,actx.sampleRate), d=buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+  const s=actx.createBufferSource(); s.buffer=buf;
+  const bp=actx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=f0*3; bp.Q.value=2;
+  const gn=actx.createGain(); gn.gain.setValueAtTime(g*0.4, t);
+  gn.gain.exponentialRampToValueAtTime(0.0001, t+0.05);
+  s.connect(bp).connect(gn).connect(out); s.start(t); s.stop(t+0.06);
+}
+
+// ---- 風 ----
+const gusts = [];
+let lastUserGust = 0;
+function hash1(i){ const s=Math.sin(i*127.1)*43758.5453; return s-Math.floor(s); }
+function n1(x){ const i=Math.floor(x), f=x-i, u=f*f*(3-2*f); return hash1(i)*(1-u)+hash1(i+1)*u; }
+function windAt(t){
+  let W = (n1(t*0.15)-0.5)*2*KNOBS.windBase;
+  for(const g of gusts){
+    const age = t-g.t0; if(age<0) continue;
+    W += g.dir*g.power*Math.exp(-age/KNOBS.gustDecay);
+  }
+  return W;
+}
+
+// ---- 入力 ----
+let lastPX=null, lastMove=0;
+function toWorld(cx,cy){ return [ (cx/innerWidth*2-1)*aspect, -(cy/innerHeight*2-1) ]; }
+addEventListener('pointerdown', e=>{
+  audioInit();
+  const [wx,wy]=toWorld(e.clientX,e.clientY);
+  for(const b of bells){
+    const hp = hangPoint(b);
+    const Lg = KNOBS.ropeLs[b.i] * (aspect<0.9 && b.i===2 ? 1.85 : 1);
+    const bc = [hp[0]+Math.sin(b.a1)*Lg, hp[1]-Math.cos(b.a1)*Lg];
+    if(Math.hypot(wx-bc[0], wy-bc[1]) < b.R*1.7) b.grabbed = true;  // 鈴を手で包む
+  }
+  lastPX=null;
+});
+addEventListener('pointerup', ()=>{ for(const b of bells) b.grabbed=false; });
+addEventListener('pointermove', e=>{
+  if(e.pointerType==='mouse' && e.buttons===0) return;
+  const [wx]=toWorld(e.clientX,e.clientY);
+  const dx = lastPX===null?0:wx-lastPX; lastPX=wx;
+  if(Math.abs(dx)<0.002) return;
+  if(tNow-lastMove<0.08) return;
+  lastMove=tNow;
+  gusts.push({t0:tNow, dir:Math.sign(dx), power:Math.min(1,Math.abs(dx)*16)*KNOBS.gustPower});
+  if(gusts.length>10) gusts.shift();
+  lastUserGust = tNow;
+});
+function hangPoint(b){ return [KNOBS.bellXs[b.i]*aspect, 0.87]; }
+
+// ---- 主ループ ----
+const t0 = performance.now();
+let tNow=0, tPrev=0, titleShown=false, nextGhost=0;
+function loop(){
+  requestAnimationFrame(loop);
+  tNow = (performance.now()-t0)/1000;
+  const dt = Math.min(0.033, tNow-tPrev||0.016); tPrev=tNow;
+  // 見えない風(気づき: 静けさが続くと、誰かが通る)
+  if(nextGhost===0) nextGhost = tNow + KNOBS.ghostSec;
+  if(tNow-lastUserGust > KNOBS.ghostSec && tNow > nextGhost){
+    gusts.push({t0:tNow, dir: hash1(tNow|0)<0.5?-1:1, power:KNOBS.ghostPower});
+    nextGhost = tNow + KNOBS.ghostSec*(0.8+hash1((tNow|0)*7)*0.8);
+  }
+  const W = windAt(tNow);
+  for(const b of bells){
+    const damp = b.grabbed ? 8.0 : 1.0;
+    // 短冊: 駆動減衰振り子
+    const acc2 = -KNOBS.omegaTan*KNOBS.omegaTan*Math.sin(b.a2)
+                 - KNOBS.dampTan*damp*b.w2
+                 + W*(0.9+0.5*b.rnd)*Math.cos(b.a2)*3.2;
+    b.w2 += acc2*dt; b.a2 += b.w2*dt;
+    // 鈴本体: 短冊に引かれて遅れて揺れる
+    const acc1 = -KNOBS.omegaBell*KNOBS.omegaBell*b.a1
+                 - KNOBS.dampBell*damp*b.w1
+                 + (b.a2-b.a1)*0.9;
+    b.w1 += acc1*dt; b.a1 += b.w1*dt;
+    // 打撃: 舌が鈴の縁に届いたら
+    const rel = b.a2 - b.a1;
+    if(Math.abs(rel) > KNOBS.strikeAng && rel*b.w2 > 0 && tNow-b.lastRing > KNOBS.minGap && !b.grabbed){
+      b.lastRing = tNow;
+      b.w2 *= -0.55;                                    // 縁で跳ね返る
+      ring(b, Math.abs(b.w2)*0.5);
+      b.jig = 1;
+    }
+    b.jig *= Math.pow(0.02, dt);
+    // ---- 姿勢の反映 ----
+    const hp = hangPoint(b);
+    const L = KNOBS.ropeLs[b.i] * (aspect<0.9 && b.i===2 ? 1.85 : 1);  // 縦画面では題の札を避けて下がる
+    const bc = [hp[0]+Math.sin(b.a1)*L, hp[1]-Math.cos(b.a1)*L];
+    b.rope.geometry.setFromPoints([new THREE.Vector3(hp[0],hp[1],0), new THREE.Vector3(bc[0],bc[1],0)]);
+    b.glass.position.set(bc[0], bc[1], 0);
+    b.glass.rotation.z = b.a1*0.6;
+    b.glass.material.uniforms.uJig.value = b.jig;
+    const cl = [bc[0]+Math.sin(b.a2)*b.R*0.62, bc[1]-Math.cos(b.a2)*b.R*0.62];
+    b.clapper.position.set(cl[0], cl[1], 0);
+    b.tan.position.set(cl[0], cl[1], 0);
+    b.tan.rotation.z = b.a2;
+  }
+  sky.material.uniforms.uTime.value = tNow;
+  if(!titleShown && tNow>KNOBS.tameTitle){
+    titleShown=true;
+    for(const id of ['tanzakuL','seal','cap']) document.getElementById(id).style.opacity=1;
+  }
+  renderer.render(scene, camera);
+}
+document.fonts ? document.fonts.ready.then(()=>{
+  bells.forEach((b,i)=>{ b.tan.material.map = tanzakuTexture(KNOBS.tanChars[i]); b.tan.material.map.needsUpdate=true; });
+}) : null;
+loop();
+</script>
+</body>
+</html>
