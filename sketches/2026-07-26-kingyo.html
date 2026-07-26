@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>金魚 — 大暑 縁日の水</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500&family=EB+Garamond:ital@1&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#e9e3d3;touch-action:none;overscroll-behavior:none}
+  canvas{display:block}
+  #frame{position:fixed; inset:16px; border:1px solid rgba(62,52,40,0.18); pointer-events:none;}
+  #tanzakuL{
+    position:fixed; top:8vh; right:8vw; padding:2.2vmin 1.4vmin 3vmin;
+    background:rgba(240,235,221,0.92); border:1px solid rgba(62,52,40,0.14);
+    box-shadow:0 1px 6px rgba(30,25,18,0.10);
+    opacity:0; transition:opacity 3.5s ease; user-select:none; pointer-events:none;
+  }
+  #tanzakuL .inner{display:flex; flex-direction:row-reverse;}
+  #title{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif; font-weight:500;
+    font-size:clamp(28px,5vmin,48px); letter-spacing:0.6em; color:#33302b;
+  }
+  #sub{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif;
+    font-size:clamp(9px,1.4vmin,12px); letter-spacing:0.42em; color:rgba(51,48,43,0.55);
+    margin-right:1.1em; padding-top:0.4em;
+  }
+  #seal{
+    position:fixed; right:calc(8vw + 1vmin); top:calc(8vh + 38vmin);
+    width:clamp(20px,3vmin,28px); height:clamp(20px,3vmin,28px);
+    background:#b8432f; color:#ede6d3; border-radius:2px;
+    font-family:'Shippori Mincho',serif; font-size:clamp(12px,1.9vmin,17px);
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; transition:opacity 3.5s ease 2.2s; user-select:none; pointer-events:none;
+  }
+  #cap{
+    position:fixed; bottom:6.5vh; left:8vw;
+    font-family:'EB Garamond',serif; font-style:italic;
+    font-size:clamp(10px,1.5vmin,13px); letter-spacing:0.08em; color:rgba(51,48,43,0.42);
+    opacity:0; transition:opacity 3.5s ease 1.6s; user-select:none; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="frame"></div>
+<div id="tanzakuL"><div class="inner"><div id="title">金魚</div><div id="sub">大暑 縁日の水</div></div></div>
+<div id="seal">魚</div>
+<div id="cap">kingyo &mdash; stillness is what they trust</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// ==== 貴優ノブ ====
+const KNOBS = {
+  // --- 間(ま)の設計 ---
+  tameTitle:   2.6,   // これを上げると、題が現れるまでの「ため」が長くなる(秒)
+  restP:       0.0022,// これを上げると、金魚がよく立ち止まる(生き物の間)
+  // --- 群れの生態 ---
+  fishN:       6,     // 金魚の数
+  speed:       0.16,  // これを上げると、泳ぎが速くなる
+  turnMax:     2.2,   // これを上げると、小回りが利く(rad/s)
+  sepR:        0.12,  // これを上げると、互いに距離を取る
+  wallR:       0.80,  // これを上げると、縁を早めに避ける(盥半径比)
+  // --- 心の設計(気づき: 静けさにだけ寄ってくる) ---
+  trustSec:    1.6,   // これを上げると、指を信じるまでの時間が延びる(静止秒)
+  gatherPull:  1.4,   // これを上げると、信じた指への寄りが強くなる
+  startleR:    0.30,  // これを上げると、急に動く指に驚く範囲が広がる
+  startleT:    2.2,   // これを上げると、驚きから落ち着くまでが長くなる(秒)
+  // --- 水の設計 ---
+  causticAmt:  0.06,  // これを上げると、水面のゆらぎ模様が濃くなる
+  rippleMax:   8,     // 同時に広がる波紋の数
+  plinkGain:   0.07,  // これを上げると、水音が大きくなる
+  plinkHz:     [293.66, 329.63, 392.0, 440.0],  // 触れた水音の音階(D4 E4 G4 A4)
+};
+// ==================
+
+import * as THREE from 'three';
+
+let aspect = innerWidth/innerHeight;
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-aspect, aspect, 1, -1, 0.1, 10);
+camera.position.z = 1;
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+// 盥(たらい)の配置: 横長なら左寄せ、縦なら中央
+let bowlC=[0,0], bowlR=0.8;
+
+// ---- 水と盥 ----
+const water = new THREE.Mesh(new THREE.PlaneGeometry(2,2), new THREE.ShaderMaterial({
+  depthTest:false, depthWrite:false,
+  uniforms:{
+    uRes:{value:new THREE.Vector2(1,1)}, uTime:{value:0},
+    uC:{value:new THREE.Vector2(0,0)}, uR:{value:0.8},
+    uCaustic:{value:KNOBS.causticAmt},
+    uRip:{value:new Float32Array(KNOBS.rippleMax*4)},   // x,y,t0,amp
+  },
+  vertexShader:`void main(){ gl_Position=vec4(position.xy,0.9999,1.0); }`,
+  fragmentShader:`
+    precision highp float;
+    uniform vec2 uRes, uC; uniform float uTime, uR, uCaustic;
+    uniform vec4 uRip[${KNOBS.rippleMax}];
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+    float n2(vec2 p){
+      vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+      return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y);
+    }
+    void main(){
+      float a = uRes.x/uRes.y;
+      vec2 p = (gl_FragCoord.xy/uRes*2.0-1.0)*vec2(a,1.0);
+      // 畳の上の生成り
+      vec3 col = vec3(0.914,0.890,0.827);
+      col *= 0.975 + 0.05*n2(p*vec2(90.0,24.0));
+      float d = distance(p, uC);
+      // 盥の木の縁
+      float rimOut = uR+0.055, rimIn = uR;
+      if(d < rimOut){
+        vec3 wood = vec3(0.545,0.447,0.337)*(0.92+0.16*n2(vec2(atan(p.y-uC.y,p.x-uC.x)*8.0, d*40.0)));
+        col = mix(col, wood, smoothstep(rimOut, rimOut-0.012, d));
+      }
+      if(d < rimIn){
+        // 水: 浅い青緑、中心ほど淡い
+        vec3 wat = mix(vec3(0.795,0.860,0.845), vec3(0.688,0.795,0.790), smoothstep(0.0, uR, d));
+        // ゆらぎ(疑似コースティクス): 二層のドメインワープ縞
+        vec2 q = p*4.2 + vec2(uTime*0.05, uTime*0.033);
+        float ca = n2(q + n2(q*1.9+uTime*0.06)*1.3);
+        wat += vec3(1.0,0.99,0.95)*smoothstep(0.64,0.95,ca)*uCaustic;
+        // 波紋(触れた輪)
+        float ring = 0.0;
+        for(int i=0;i<${KNOBS.rippleMax};i++){
+          float age = uTime - uRip[i].z;
+          if(age<0.0 || age>2.6) continue;
+          float rr = age*0.42;
+          ring += uRip[i].w * exp(-age*1.6) * smoothstep(0.03,0.0,abs(distance(p,uRip[i].xy)-rr)-0.012);
+        }
+        wat += vec3(0.9,0.92,0.9)*ring*0.5;
+        // 縁の内側の影
+        wat *= 1.0 - 0.22*smoothstep(uR*0.82, uR, d);
+        col = mix(col, wat, smoothstep(rimIn, rimIn-0.008, d));
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }`
+}));
+water.renderOrder=-1; water.frustumCulled=false;
+scene.add(water);
+
+// ---- 金魚 ----
+function hash1(i){ const s=Math.sin(i*127.1)*43758.5453; return s-Math.floor(s); }
+function n1(x){ const i=Math.floor(x), f=x-i, u=f*f*(3-2*f); return hash1(i)*(1-u)+hash1(i+1)*u; }
+const FISH_KINDS = [
+  {body:[0.777,0.290,0.176], back:[0.628,0.188,0.110]},  // 緋
+  {body:[0.777,0.290,0.176], back:[0.628,0.188,0.110]},
+  {body:[0.910,0.860,0.790], back:[0.777,0.360,0.240]},  // 更紗(白勝ち)
+  {body:[0.777,0.290,0.176], back:[0.628,0.188,0.110]},
+  {body:[0.225,0.215,0.220], back:[0.130,0.125,0.135]},  // 出目金(墨)
+  {body:[0.870,0.470,0.230], back:[0.700,0.320,0.150]},  // 山吹
+];
+const fishMeshes=[], fish=[];
+for(let i=0;i<KNOBS.fishN;i++){
+  const kind = FISH_KINDS[i%FISH_KINDS.length];
+  const size = 0.085*(0.85+hash1(i*7)*0.4);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(size*2.6, size*1.6), new THREE.ShaderMaterial({
+    transparent:true, depthTest:false, depthWrite:false,
+    uniforms:{
+      uPh:{value:0}, uBody:{value:new THREE.Vector3(...kind.body)},
+      uBack:{value:new THREE.Vector3(...kind.back)}, uSeed:{value:hash1(i*13)*10},
+    },
+    vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader:`
+      precision highp float;
+      uniform float uPh, uSeed; uniform vec3 uBody, uBack;
+      varying vec2 vUv;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+      float n2(vec2 p){
+        vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y);
+      }
+      void main(){
+        // 頭(x=0.9)→尾(x=0.1)。泳ぎで体と尾がくねる
+        vec2 p = vUv;
+        float sway = sin(uPh + (0.9-p.x)*5.0) * 0.06 * (1.1-p.x);
+        p.y += sway;
+        float cx = (p.x-0.62)/0.30, cy = (p.y-0.5)/0.30;
+        // 体: 頭側が丸く尾側が細い滴形
+        float w = sqrt(max(0.0, 1.0-cx*cx)) * (0.62 + 0.38*smoothstep(-1.0,1.0,cx));
+        float body = smoothstep(0.06, -0.04, abs(cy)-w*0.62);
+        // 尾鰭: 後方に開く二葉、揺れる
+        float tx = (0.36-p.x)/0.30;
+        float tail = 0.0;
+        if(tx>0.0 && tx<1.2){
+          float spread = 0.10 + tx*0.34;
+          float lobe = min(abs(p.y-0.5-spread*0.5), abs(p.y-0.5+spread*0.5));
+          tail = smoothstep(0.10, 0.0, lobe - 0.05*(1.0-tx*0.5)) * smoothstep(1.2,0.4,tx) * 0.75;
+        }
+        float alpha = max(body, tail);
+        if(alpha<0.02) discard;
+        // 背は濃く、腹へ淡く。にじみ紙肌
+        vec3 col = mix(uBody, uBack, smoothstep(0.0,0.5,abs(cy))*0.9);
+        col *= 0.93 + 0.13*n2(p*vec2(9.0,7.0)+uSeed);
+        col = mix(col, uBack*0.8, (1.0-smoothstep(0.0,0.10,w*0.62-abs(cy)))*0.35*body); // 輪郭の墨
+        gl_FragColor = vec4(col, alpha*0.94);
+      }`
+  }));
+  m.renderOrder = 2; m.frustumCulled = false;
+  // 底影(浅い水の中に浮いている感じ): 楕円にぼかす
+  const sh = new THREE.Mesh(new THREE.PlaneGeometry(size*2.2, size*1.1), new THREE.ShaderMaterial({
+    transparent:true, depthTest:false, depthWrite:false,
+    vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader:`
+      varying vec2 vUv;
+      void main(){
+        float d = length((vUv-0.5)*vec2(2.1,3.0));
+        float a = (1.0-smoothstep(0.35,1.0,d))*0.14;
+        gl_FragColor = vec4(0.20,0.27,0.26,a);
+      }`
+  }));
+  sh.renderOrder = 1; sh.frustumCulled = false;
+  scene.add(sh, m);
+  fishMeshes.push({m, sh});
+  fish.push({
+    x:0, y:0, a:hash1(i*3)*6.28, sp:KNOBS.speed*(0.8+hash1(i*11)*0.5),
+    ph:hash1(i*17)*100, rest:0, fear:0, size,
+  });
+}
+
+// ---- 波紋・音 ----
+const rip = water.material.uniforms.uRip.value;
+let ripSlot=0, actx=null;
+function audioInit(){ if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)(); }
+function plink(x01){
+  if(!actx) return;
+  const o=actx.createOscillator(); o.type='sine';
+  o.frequency.value = KNOBS.plinkHz[Math.floor(Math.random()*KNOBS.plinkHz.length)];
+  const g=actx.createGain(); const t=actx.currentTime;
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(KNOBS.plinkGain,t+0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+0.9);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t+1);
+  o.frequency.exponentialRampToValueAtTime(o.frequency.value*0.97, t+0.7);
+}
+function ripple(x,y,amp){
+  rip.set([x,y,tNow,amp], (ripSlot++%KNOBS.rippleMax)*4);
+  plink();
+}
+
+// ---- 指(静けさの信頼) ----
+let finger={x:0,y:0,down:false,stillT:0,lastMove:0,speed:0};
+function toWorld(cx,cy){ return [ (cx/innerWidth*2-1)*aspect, -(cy/innerHeight*2-1) ]; }
+addEventListener('pointerdown', e=>{
+  audioInit();
+  const [wx,wy]=toWorld(e.clientX,e.clientY);
+  finger={x:wx,y:wy,down:true,stillT:0,lastMove:tNow,speed:0};
+  if(Math.hypot(wx-bowlC[0],wy-bowlC[1])<bowlR) ripple(wx,wy,1);
+});
+addEventListener('pointerup', ()=>{ finger.down=false; });
+addEventListener('pointermove', e=>{
+  const [wx,wy]=toWorld(e.clientX,e.clientY);
+  const d=Math.hypot(wx-finger.x, wy-finger.y);
+  finger.speed = d/Math.max(0.016, tNow-finger.lastMove);
+  if(d>0.004){ finger.stillT=0; finger.lastMove=tNow; }
+  finger.x=wx; finger.y=wy;
+  // 速い動きは驚かせる
+  if(finger.down && finger.speed>1.4){
+    for(const f of fish){
+      if(Math.hypot(f.x-wx,f.y-wy)<KNOBS.startleR) f.fear = KNOBS.startleT;
+    }
+    if(Math.hypot(wx-bowlC[0],wy-bowlC[1])<bowlR && tNow-lastRip>0.25){ lastRip=tNow; ripple(wx,wy,0.6); }
+  }
+});
+let lastRip=0;
+
+// ---- 主ループ ----
+const t0=performance.now();
+let tNow=0, tPrev=0, titleShown=false;
+function loop(){
+  requestAnimationFrame(loop);
+  tNow=(performance.now()-t0)/1000;
+  const dt=Math.min(0.033, tNow-tPrev||0.016); tPrev=tNow;
+  if(finger.down) finger.stillT += dt;
+  const trusted = finger.down && finger.stillT > KNOBS.trustSec
+    && Math.hypot(finger.x-bowlC[0], finger.y-bowlC[1]) < bowlR*0.92;
+
+  for(let i=0;i<fish.length;i++){
+    const f=fish[i];
+    f.fear = Math.max(0, f.fear-dt);
+    if(f.rest>0 && f.fear===0){ f.rest-=dt; }
+    else{
+      if(f.fear===0 && Math.random()<KNOBS.restP) f.rest = 0.8+Math.random()*2.2;
+      let steer=(n1(tNow*0.4+f.ph)-0.5)*3.0;                       // 徘徊
+      for(const g of fish){ if(g===f) continue;                    // 分離
+        const dx=g.x-f.x, dy=g.y-f.y, d=Math.hypot(dx,dy);
+        if(d<KNOBS.sepR){ const rel=Math.atan2(dy,dx)-f.a; steer-=Math.sin(rel)*(1-d/KNOBS.sepR)*4.5; } }
+      const rx=f.x-bowlC[0], ry=f.y-bowlC[1], rd=Math.hypot(rx,ry); // 壁回避
+      if(rd>bowlR*KNOBS.wallR){ const rel=Math.atan2(-ry,-rx)-f.a; steer+=Math.sin(rel)*(rd/bowlR-KNOBS.wallR)*30; }
+      let spd=f.sp;
+      if(f.fear>0){                                                // 驚き: 指から逃げる
+        const rel=Math.atan2(f.y-finger.y, f.x-finger.x)-f.a;
+        steer+=Math.sin(rel)*6; spd*=2.6;
+      } else if(trusted){                                          // 信頼: 静かな指に寄る
+        const dd=Math.hypot(finger.x-f.x, finger.y-f.y);
+        if(dd>0.12){ const rel=Math.atan2(finger.y-f.y, finger.x-f.x)-f.a;
+          steer+=Math.sin(rel)*KNOBS.gatherPull; }
+        else spd*=0.5;                                             // そばでは、ゆっくり
+      }
+      f.a += Math.max(-KNOBS.turnMax, Math.min(KNOBS.turnMax, steer))*dt*(f.fear>0?2:1);
+      f.x += Math.cos(f.a)*spd*dt; f.y += Math.sin(f.a)*spd*dt;
+      // 盥の外には出られない
+      const rd2=Math.hypot(f.x-bowlC[0], f.y-bowlC[1]);
+      if(rd2>bowlR*0.86){ const k=bowlR*0.86/rd2; f.x=bowlC[0]+(f.x-bowlC[0])*k; f.y=bowlC[1]+(f.y-bowlC[1])*k; }
+    }
+    const fm=fishMeshes[i];
+    fm.m.position.set(f.x, f.y, 0);
+    fm.m.rotation.z = f.a;
+    fm.sh.position.set(f.x+0.018, f.y-0.022, 0);
+    fm.sh.rotation.z = f.a;
+    const swim = (f.rest>0? 0.35 : 1)*(f.fear>0? 2.6 : 1);
+    fm.m.material.uniforms.uPh.value += dt*7*swim;
+  }
+  water.material.uniforms.uTime.value = tNow;
+  if(!titleShown && tNow>KNOBS.tameTitle){
+    titleShown=true;
+    for(const id of ['tanzakuL','seal','cap']) document.getElementById(id).style.opacity=1;
+  }
+  renderer.render(scene, camera);
+}
+function layout(){
+  aspect=innerWidth/innerHeight;
+  camera.left=-aspect; camera.right=aspect; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  const pr=renderer.getPixelRatio();
+  water.material.uniforms.uRes.value.set(innerWidth*pr, innerHeight*pr);
+  bowlC = aspect>0.9 ? [-0.28*aspect, -0.04] : [0, -0.10];
+  bowlR = aspect>0.9 ? 0.80 : Math.min(0.86*aspect, 0.62);
+  water.material.uniforms.uC.value.set(bowlC[0], bowlC[1]);
+  water.material.uniforms.uR.value = bowlR;
+  for(const f of fish){ if(Math.hypot(f.x-bowlC[0],f.y-bowlC[1])>bowlR*0.9){ f.x=bowlC[0]; f.y=bowlC[1]; } }
+}
+layout();
+addEventListener('resize', layout);
+loop();
+</script>
+</body>
+</html>
