@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>打水 — 大暑 土潤溽暑</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500&family=EB+Garamond:ital@1&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#c9c1ae;touch-action:none;overscroll-behavior:none}
+  canvas{display:block}
+  #frame{position:fixed; inset:16px; border:1px solid rgba(40,36,30,0.22); pointer-events:none;}
+  #tanzaku{
+    position:fixed; top:8vh; right:8vw; padding:2.2vmin 1.4vmin 3vmin;
+    background:rgba(240,235,221,0.92); border:1px solid rgba(62,52,40,0.14);
+    box-shadow:0 1px 6px rgba(30,25,18,0.10);
+    opacity:0; transition:opacity 3.5s ease; user-select:none; pointer-events:none;
+  }
+  #title{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif; font-weight:500;
+    font-size:clamp(28px,5vmin,48px); letter-spacing:0.6em; color:#33302b;
+  }
+  #sub{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif;
+    font-size:clamp(9px,1.4vmin,12px); letter-spacing:0.42em; color:rgba(51,48,43,0.55);
+    margin-right:1.1em; padding-top:0.4em;
+  }
+  #tanzaku .inner{display:flex; flex-direction:row-reverse;}
+  #seal{
+    position:fixed; right:calc(8vw + 1vmin); top:calc(8vh + 38vmin);
+    width:clamp(20px,3vmin,28px); height:clamp(20px,3vmin,28px);
+    background:#b8432f; color:#ede6d3; border-radius:2px;
+    font-family:'Shippori Mincho',serif; font-size:clamp(12px,1.9vmin,17px);
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; transition:opacity 3.5s ease 2.2s; user-select:none; pointer-events:none;
+  }
+  #cap{
+    position:fixed; bottom:6.5vh; left:8vw;
+    font-family:'EB Garamond',serif; font-style:italic;
+    font-size:clamp(10px,1.5vmin,13px); letter-spacing:0.08em; color:rgba(30,28,24,0.48);
+    opacity:0; transition:opacity 3.5s ease 1.6s; user-select:none; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="frame"></div>
+<div id="tanzaku"><div class="inner"><div id="title">打水</div><div id="sub">大暑 次候 土潤溽暑</div></div></div>
+<div id="seal">水</div>
+<div id="cap">uchimizu &mdash; for the guest yet to arrive</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// ==== 貴優ノブ ====
+const KNOBS = {
+  // --- 間(ま)の設計 ---
+  tameTitle:   2.6,   // これを上げると、短冊が現れるまでの「ため」が長くなる(秒)
+  ghostSecMin: 16,    // これを上げると、見えない誰かが打ち水をしに来る間隔が延びる(秒・最短)
+  ghostSecMax: 34,    // 同・最長(秒)。二人の打ち水が呼吸を合わせないための幅
+  // --- 波の設計 ---
+  waveSpeed:   0.9,   // これを上げると、波紋が速く走る
+  waveFreq:    15.0,  // これを上げると、波の震えが細かくなる
+  waveDamp:    2.2,   // これを上げると、波が早く鎮まる(ためらいが短くなる)
+  waveReach:   1.6,   // これを下げると、波紋が遠くまで届く(距離減衰)
+  popAmt:      0.24,  // これを上げると、波が石を持ち上げる高さが増す
+  // --- 水と乾きの設計 ---
+  wetDepth:    0.9,   // これを上げると、濡れ色が深くなる
+  drySec:      26,    // これを上げると、石が乾くまでの時間が延びる(余韻)
+  wetReach:    5.5,   // これを下げると、一撒きで濡れる範囲が広がる
+  seaAmt:      0.26,  // これを上げると、濡れた石に浮かぶ青海波が濃くなる(気づきの声量)
+  // --- 暑さの設計 ---
+  shimmerAmt:  0.045, // これを上げると、乾いた石の陽炎(ちらつき)が強くなる
+  shimmerHz:   0.55,  // これを上げると、陽炎が速く揺れる
+  // --- 石の設計 ---
+  tileSize:    0.115, // これを上げると、石が大きくなる
+  gap:         0.13,  // これを上げると、目地(石の隙間)が広がる(石サイズ比)
+  // --- 音の設計(撒くたび水音が鳴る。実は五音音階) ---
+  scaleHz:     [587.33, 698.46, 783.99, 880.0, 1046.5], // 撒いた場所の高さで選ばれる音階(D5 F5 G5 A5 C6)
+  plinkGain:   0.10,  // これを上げると、雫の音が大きくなる
+  splashGain:  0.05,  // これを上げると、水の「さっ」という散り音が大きくなる
+};
+// ==================
+
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+let aspect = innerWidth/innerHeight;
+const camera = new THREE.OrthographicCamera(-aspect, aspect, 1, -1, 0.1, 10);
+camera.position.z = 1;
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(new THREE.Color('#c9c1ae'));   // 目地の色
+document.body.appendChild(renderer.domElement);
+
+const MAXI = 24;
+const imp = new Float32Array(MAXI*4).fill(-1e4);
+
+let mesh = null;
+function buildGrid(){
+  aspect = innerWidth/innerHeight;
+  camera.left=-aspect; camera.right=aspect; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  if(mesh){ scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
+  const S = KNOBS.tileSize;
+  const COLS = Math.ceil(2*aspect/S)+2, ROWS = Math.ceil(2/S)+2, N = COLS*ROWS;
+  const geo = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(S*(1-KNOBS.gap), S*(1-KNOBS.gap)));
+  const pos = new Float32Array(N*2), rnd = new Float32Array(N);
+  let k2=0;
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    const i = r*COLS+c;
+    // 乱張り: 半タイルずつ行をずらし、位置もわずかに揺らす
+    pos[k2++] = -aspect + (c + (r%2)*0.5)*S + (hash1(i*3)-0.5)*S*0.06;
+    pos[k2++] = -1 + r*S + (hash1(i*7)-0.5)*S*0.06;
+    rnd[i] = hash1(i*13);
+  }
+  geo.setAttribute('aPos', new THREE.InstancedBufferAttribute(pos, 2));
+  geo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(rnd, 1));
+  geo.instanceCount = N;
+  const mat = new THREE.ShaderMaterial({
+    uniforms:{
+      uTime:{value:0}, uImp:{value:imp},
+      uK:{value:new THREE.Vector4(KNOBS.waveSpeed, KNOBS.waveFreq, KNOBS.waveDamp, KNOBS.waveReach)},
+      uW:{value:new THREE.Vector4(KNOBS.wetDepth, KNOBS.drySec, KNOBS.wetReach, KNOBS.seaAmt)},
+      uS:{value:new THREE.Vector2(KNOBS.shimmerAmt, KNOBS.shimmerHz)},
+      uPop:{value:KNOBS.popAmt},
+    },
+    vertexShader:`
+      attribute vec2 aPos; attribute float aRnd;
+      uniform float uTime; uniform vec4 uImp[${MAXI}]; uniform vec4 uK; uniform float uPop;
+      varying vec2 vUv; varying vec2 vWpix; varying float vRnd, vDispT;
+      void main(){
+        float disp = 0.0;
+        for(int i=0;i<${MAXI};i++){
+          float d = distance(aPos, uImp[i].xy);
+          float tt = uTime - uImp[i].z - d/uK.x;
+          if(tt > 0.0) disp += uImp[i].w * exp(-tt*uK.z) * sin(tt*uK.y) * exp(-d*uK.w);
+        }
+        vDispT = disp;
+        vUv = uv; vWpix = aPos + position.xy; vRnd = aRnd;
+        vec3 p = position * (1.0 + max(disp,0.0)*uPop) + vec3(aPos, 0.0);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader:`
+      precision highp float;
+      uniform float uTime; uniform vec4 uImp[${MAXI}]; uniform vec4 uK; uniform vec4 uW; uniform vec2 uS;
+      varying vec2 vUv; varying vec2 vWpix; varying float vRnd, vDispT;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+      float n2(vec2 p){
+        vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y);
+      }
+      // 青海波: 千鳥配置の中心からの同心円弧(布地のように細かく)
+      float seigaiha(vec2 p){
+        float S = 20.0;
+        float row = floor(p.y*S);
+        vec2 c = vec2((floor(p.x*S - mod(row,2.0)*0.5) + 0.5 + mod(row,2.0)*0.5)/S, row/S);
+        float d = distance(p, c);
+        float ring = smoothstep(0.30, 0.05, abs(fract(d*S*3.5)-0.5)*2.0 - 0.30);
+        return ring * smoothstep(0.075, 0.02, d);
+      }
+      void main(){
+        // 角丸の石マスク
+        vec2 q = abs(vUv-0.5)*2.0;
+        float r = length(max(q - 0.72, 0.0));
+        float mask = 1.0 - smoothstep(0.24, 0.30, r);
+        if(mask < 0.01) discard;
+        // 濡れと波をピクセル単位で(石の中でも水際が滲むように)
+        float vWet = 0.0;
+        for(int i=0;i<${MAXI};i++){
+          float d = distance(vWpix, uImp[i].xy);
+          float tt = uTime - uImp[i].z - d/uK.x;
+          if(tt > 0.0){
+            vWet += uImp[i].w * 3.4 * smoothstep(0.0, 0.35, tt) * exp(-tt/uW.y) * exp(-d*uW.z*(0.8+0.4*fract(uImp[i].z*7.31)));
+          }
+        }
+        float vDisp = vDispT;
+        vWet = clamp(vWet * (0.92 + 0.25*n2(vWpix*26.0 + vRnd)), 0.0, 1.0);  // 水際の滲み
+        // 乾いた石: 生成りの砂色、石ごとの個体差
+        vec3 dry = mix(vec3(0.83,0.78,0.68), vec3(0.76,0.72,0.65), vRnd);
+        dry *= 0.96 + 0.08*n2(vUv*5.0 + vRnd*37.0);        // 石肌
+        // 陽炎: 乾いた石だけがちらつく
+        float shim = (n2(vec2(uTime*uS.y + vRnd*61.0, vRnd*23.0))-0.5) * uS.x * (1.0-vWet);
+        dry += shim;
+        // 濡れ色: 藍墨に沈む
+        vec3 wetc = mix(vec3(0.25,0.29,0.35), vec3(0.17,0.20,0.26), vRnd);
+        wetc *= 0.94 + 0.12*n2(vUv*4.0 + vRnd*53.0);       // 濡れむら
+        float wetAmt = vWet * uW.x;
+        vec3 col = mix(dry, wetc, smoothstep(0.38, 0.56, wetAmt));
+        // 気づき: よく濡れた石にだけ、海の文様が浮かぶ
+        col += vec3(0.36,0.46,0.55) * seigaiha(vWpix) * uW.w * smoothstep(0.5, 0.92, wetAmt);
+        // 波の照り
+        col += vec3(0.34,0.31,0.24) * max(vDisp, 0.0) * 2.6;
+        gl_FragColor = vec4(col, 1.0);
+      }`
+  });
+  mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+}
+function hash1(i){ const s=Math.sin(i*127.1)*43758.5453; return s-Math.floor(s); }
+buildGrid();
+addEventListener('resize', buildGrid);
+
+// ---- 音(雫と散り) ----
+let actx=null, noiseBuf=null;
+function audioInit(){
+  if(actx) return;
+  actx = new (window.AudioContext||window.webkitAudioContext)();
+  const len = actx.sampleRate;
+  noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+}
+function plink(y01, gain){
+  if(!actx) return;
+  const o = actx.createOscillator(); o.type='sine';
+  const idx = Math.max(0, Math.min(KNOBS.scaleHz.length-1, Math.floor(y01*KNOBS.scaleHz.length)));
+  o.frequency.value = KNOBS.scaleHz[idx];
+  const g = actx.createGain(); const t = actx.currentTime;
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(gain, t+0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+0.5);
+  o.connect(g).connect(actx.destination);
+  o.start(t); o.stop(t+0.55);
+  // 雫の甘い揺れ: ほんのわずかに下がる
+  o.frequency.exponentialRampToValueAtTime(KNOBS.scaleHz[idx]*0.985, t+0.4);
+}
+function splash(gain){
+  if(!actx) return;
+  const src=actx.createBufferSource(); src.buffer=noiseBuf;
+  const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=2600;
+  const g=actx.createGain(); const t=actx.currentTime;
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+0.22);
+  src.connect(lp).connect(g).connect(actx.destination);
+  src.start(t); src.stop(t+0.25);
+}
+
+// ---- 入力: 撒く ----
+let slot=0, lastImp=0;
+function sprinkle(wx, wy, amp, gain){
+  imp.set([wx, wy, tNow, amp], (slot++%MAXI)*4);
+  plink((wy+1)/2, gain);
+  splash(gain*0.5*KNOBS.splashGain/KNOBS.plinkGain);
+}
+function toWorld(cx,cy){ return [ (cx/innerWidth*2-1)*aspect, -(cy/innerHeight*2-1) ]; }
+addEventListener('pointerdown', e=>{
+  audioInit();
+  const [wx,wy]=toWorld(e.clientX,e.clientY);
+  sprinkle(wx, wy, 0.15, KNOBS.plinkGain);
+  lastImp = tNow;
+});
+addEventListener('pointermove', e=>{
+  if(e.buttons===0 && e.pointerType==='mouse') return;
+  if(tNow-lastImp < 0.12) return;
+  const [wx,wy]=toWorld(e.clientX,e.clientY);
+  sprinkle(wx, wy, 0.11, KNOBS.plinkGain*0.7);
+  lastImp = tNow;
+});
+
+// ---- 見えない誰かの打ち水(気づきの二層目) ----
+let nextGhost = KNOBS.ghostSecMin + hash1(99)* (KNOBS.ghostSecMax-KNOBS.ghostSecMin);
+function ghost(){
+  const side = hash1(slot*31+1);
+  const wx = (side<0.5 ? -1 : 1) * aspect * (0.55+0.4*hash1(slot*17+2));
+  const wy = -1 + 2*hash1(slot*23+3);
+  sprinkle(wx, wy, 0.10, KNOBS.plinkGain*0.35);
+  nextGhost = tNow + KNOBS.ghostSecMin + hash1(slot*41+4)*(KNOBS.ghostSecMax-KNOBS.ghostSecMin);
+}
+
+// ---- 主ループ ----
+const t0 = performance.now();
+let tNow=0, titleShown=false;
+function loop(){
+  requestAnimationFrame(loop);
+  tNow = (performance.now()-t0)/1000;
+  if(mesh) mesh.material.uniforms.uTime.value = tNow;
+  if(tNow > nextGhost) ghost();
+  if(!titleShown && tNow > KNOBS.tameTitle){
+    titleShown = true;
+    for(const id of ['tanzaku','seal','cap']) document.getElementById(id).style.opacity=1;
+  }
+  renderer.render(scene, camera);
+}
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>験: Rayleigh/Mie空</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#000}canvas{display:block}</style>
+</head>
+<body>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// 験: 単一散乱近似の空。マウス上下=太陽高度。T=exp(-β·k·m)、散乱=(1-T)·太陽透過色。
+import * as THREE from 'three';
+const scene = new THREE.Scene(), cam = new THREE.Camera();
+const ren = new THREE.WebGLRenderer(); ren.setSize(innerWidth, innerHeight);
+document.body.appendChild(ren.domElement);
+const mat = new THREE.ShaderMaterial({
+  uniforms:{ uSunEl:{value:0.3}, uRes:{value:new THREE.Vector2(innerWidth, innerHeight)} },
+  vertexShader:`void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader:`
+    precision highp float;
+    uniform float uSunEl; uniform vec2 uRes;
+    void main(){
+      vec2 uv = gl_FragCoord.xy/uRes;
+      float el = mix(0.0, 0.9, uv.y);                     // 視線の仰角
+      float m  = 1.0/(el+0.08);                           // エアマス(視線)
+      float ms = 1.0/(uSunEl+0.08);                       // エアマス(太陽)
+      vec3 beta = vec3(5.8, 13.5, 33.1)*0.02;             // Rayleigh係数(青ほど散る)
+      vec3 sunT = exp(-beta*ms);                          // 太陽の透過色(低いほど赤金)
+      vec3 sky  = (1.0-exp(-beta*m)) * sunT * 1.6;        // 視線散乱×太陽色
+      // Mie: 太陽方向のハロー(HG近似)
+      vec2 sunPos = vec2(0.5, uSunEl);
+      float cosT = 1.0 - distance(uv*vec2(uRes.x/uRes.y,1.0), sunPos*vec2(uRes.x/uRes.y,1.0))*2.2;
+      float g = 0.82, hg = (1.0-g*g)/pow(1.0+g*g-2.0*g*clamp(cosT,-1.,1.), 1.5);
+      sky += vec3(1.0,0.85,0.6) * hg * 0.015 * sunT;
+      gl_FragColor = vec4(1.0-exp(-sky), 1.0);            // トーンマップ
+    }`
+});
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2), mat));
+addEventListener('pointermove', e=>{ mat.uniforms.uSunEl.value = Math.max(0.01, 1-e.clientY/innerHeight)*0.9; });
+(function loop(){ requestAnimationFrame(loop); ren.render(scene, cam); })();
+</script>
+</body>
+</html>

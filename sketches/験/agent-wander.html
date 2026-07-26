@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>験: 行動則エージェント</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#e8e4d8}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+// 験: 徘徊+分離+円形壁回避。物理でなく生態。2D canvasで最小に。
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+cv.width=innerWidth; cv.height=innerHeight;
+const C=[cv.width/2, cv.height/2], R=Math.min(cv.width,cv.height)*0.42;
+const A=[];
+for(let i=0;i<8;i++) A.push({x:C[0]+(Math.random()-0.5)*R, y:C[1]+(Math.random()-0.5)*R,
+  a:Math.random()*6.28, v:30+Math.random()*40, ph:Math.random()*100, rest:0});
+function n1(x){ const i=Math.floor(x), f=x-i, u=f*f*(3-2*f);
+  const h=k=>{const s=Math.sin(k*127.1)*43758.5453; return s-Math.floor(s);};
+  return h(i)*(1-u)+h(i+1)*u; }
+let tp=performance.now();
+(function loop(){
+  requestAnimationFrame(loop);
+  const tn=performance.now(), dt=Math.min(0.033,(tn-tp)/1000), t=tn/1000; tp=tn;
+  ctx.fillStyle='rgba(232,228,216,0.25)'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.strokeStyle='rgba(60,55,45,0.3)'; ctx.beginPath(); ctx.arc(C[0],C[1],R,0,6.29); ctx.stroke();
+  for(const a of A){
+    // 休む個体がいる(全員動くと機械になる)
+    if(a.rest>0){ a.rest-=dt; }
+    else{
+      if(Math.random()<0.002) a.rest=1+Math.random()*2;
+      let steer=(n1(t*0.4+a.ph)-0.5)*3.0;                    // 徘徊
+      for(const b of A){ if(b===a) continue;                 // 分離
+        const dx=b.x-a.x, dy=b.y-a.y, d=Math.hypot(dx,dy);
+        if(d<50){ const rel=Math.atan2(dy,dx)-a.a; steer-=Math.sin(rel)*(1-d/50)*4; } }
+      const rx=a.x-C[0], ry=a.y-C[1], rd=Math.hypot(rx,ry);  // 壁回避
+      if(rd>R*0.8){ const inward=Math.atan2(-ry,-rx), rel=inward-a.a; steer+=Math.sin(rel)*(rd/R-0.8)*22; }
+      a.a+=Math.max(-2.4,Math.min(2.4,steer))*dt;
+      a.x+=Math.cos(a.a)*a.v*dt; a.y+=Math.sin(a.a)*a.v*dt;
+    }
+    ctx.save(); ctx.translate(a.x,a.y); ctx.rotate(a.a);
+    ctx.fillStyle='rgba(50,45,40,0.85)';
+    ctx.beginPath(); ctx.ellipse(0,0,9,3.5,0,0,6.29); ctx.fill();
+    ctx.restore();
+  }
+})();
+</script>
+</body>
+</html>

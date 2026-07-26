@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>験: 分岐する火花</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#101218}canvas{display:block}</style>
+</head>
+<body>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// 験: 粒子にbranchAtを持たせ、通過時に子を生む。軌跡は残像法(半透明クアッド)。クリックで一発。
+import * as THREE from 'three';
+let aspect = innerWidth/innerHeight;
+const scene = new THREE.Scene();
+const cam = new THREE.OrthographicCamera(-aspect, aspect, 1, -1, 0.1, 10); cam.position.z=1;
+const ren = new THREE.WebGLRenderer(); ren.setSize(innerWidth, innerHeight); ren.autoClear=false;
+document.body.appendChild(ren.domElement);
+const fade = new THREE.Mesh(new THREE.PlaneGeometry(2,2), new THREE.MeshBasicMaterial({color:0x101218, transparent:true, opacity:0.14, depthTest:false}));
+fade.renderOrder=0; fade.frustumCulled=false;
+const fadeScene = new THREE.Scene(); fadeScene.add(fade);
+const N=2000, pos=new Float32Array(N*3), heat=new Float32Array(N);
+const P=[]; for(let i=0;i<N;i++) P.push({on:false});
+const geo=new THREE.BufferGeometry();
+geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+geo.setAttribute('aHeat', new THREE.BufferAttribute(heat,1));
+const pts=new THREE.Points(geo, new THREE.ShaderMaterial({
+  transparent:true, blending:THREE.AdditiveBlending, depthTest:false,
+  vertexShader:`attribute float aHeat; varying float vH;
+    void main(){ vH=aHeat; gl_PointSize=3.0; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`varying float vH;
+    void main(){
+      float d=length(gl_PointCoord-0.5)*2.0; if(d>1.0) discard;
+      vec3 c=mix(vec3(1.0,0.45,0.12), vec3(1.0,0.95,0.8), vH);
+      gl_FragColor=vec4(c, vH*(1.0-d));
+    }`
+}));
+pts.frustumCulled=false; scene.add(pts);
+function spawn(x,y,vx,vy,life,gen){
+  const p=P.find(q=>!q.on); if(!p) return;
+  Object.assign(p,{on:true,x,y,vx,vy,age:0,life,gen,branchAt:gen<2&&Math.random()<0.6?life*(0.3+Math.random()*0.4):-1});
+}
+addEventListener('pointerdown', e=>{
+  const x=(e.clientX/innerWidth*2-1)*aspect, y=-(e.clientY/innerHeight*2-1);
+  for(let k=0;k<26;k++){ const a=Math.random()*6.283, s=0.5+Math.random()*0.9;
+    spawn(x,y,Math.cos(a)*s,Math.sin(a)*s,0.5+Math.random()*0.5,0); }
+});
+let tp=performance.now();
+(function loop(){
+  requestAnimationFrame(loop);
+  const tn=performance.now(), dt=Math.min(0.033,(tn-tp)/1000); tp=tn;
+  let k=0;
+  for(const p of P){
+    if(!p.on) continue;
+    p.age+=dt;
+    if(p.age>=p.life){ p.on=false; continue; }
+    if(p.branchAt>0 && p.age>=p.branchAt){
+      p.branchAt=-1;
+      const n=2+(Math.random()*3|0);
+      for(let j=0;j<n;j++){ const r=(Math.random()-0.5)*1.6, c=Math.cos(r), s=Math.sin(r);
+        spawn(p.x,p.y,(p.vx*c-p.vy*s)*0.7,(p.vx*s+p.vy*c)*0.7, p.life*0.4, p.gen+1); }
+    }
+    p.vy-=0.45*dt; p.vx*=1-0.6*dt; p.vy*=1-0.3*dt;
+    p.x+=p.vx*dt; p.y+=p.vy*dt;
+    pos[k*3]=p.x; pos[k*3+1]=p.y; pos[k*3+2]=0;
+    heat[k]=1-p.age/p.life; k++;
+  }
+  for(let i=k;i<N;i++){ pos[i*3]=1e4; heat[i]=0; }
+  geo.attributes.position.needsUpdate=true; geo.attributes.aHeat.needsUpdate=true;
+  ren.render(fadeScene,cam); ren.render(scene,cam);
+})();
+</script>
+</body>
+</html>

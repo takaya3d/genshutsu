@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>験: モーダル鈴</title>
+<style>html,body{margin:0;height:100%;background:#1c1e22;color:#cfc8b8;font-family:serif;display:flex;align-items:center;justify-content:center}p{opacity:.6}</style>
+</head>
+<body>
+<p>クリックで鳴る(高さ=f0)。非整数次倍音 [1, 2.32, 3.85, 5.11, 6.4]</p>
+<script>
+// 験: モーダル合成。各固有モード=正弦波+指数減衰、高次ほど速く消える。
+let actx=null;
+const RATIOS=[1,2.32,3.85,5.11,6.4], GAINS=[1,0.5,0.28,0.16,0.09], DECAYS=[3.2,2.0,1.1,0.6,0.35];
+function ring(f0, vel){
+  const t=actx.currentTime;
+  RATIOS.forEach((r,i)=>{
+    const o=actx.createOscillator(); o.type='sine';
+    o.frequency.value=f0*r*(1+(Math.random()-0.5)*0.006);   // detuneで空気感
+    const g=actx.createGain();
+    g.gain.setValueAtTime(0,t);
+    g.gain.linearRampToValueAtTime(vel*GAINS[i]*0.12, t+0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+DECAYS[i]);
+    o.connect(g).connect(actx.destination);
+    o.start(t); o.stop(t+DECAYS[i]+0.1);
+  });
+  // 立ち上がりの「ちん」
+  const len=actx.sampleRate*0.05, buf=actx.createBuffer(1,len,actx.sampleRate), d=buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+  const s=actx.createBufferSource(); s.buffer=buf;
+  const bp=actx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=f0*3; bp.Q.value=2;
+  const g=actx.createGain(); g.gain.setValueAtTime(vel*0.05,t);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+0.05);
+  s.connect(bp).connect(g).connect(actx.destination); s.start(t); s.stop(t+0.06);
+}
+addEventListener('pointerdown', e=>{
+  actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+  ring(1400 + (1-e.clientY/innerHeight)*2400, 0.9);
+});
+</script>
+</body>
+</html>

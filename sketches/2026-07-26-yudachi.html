@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>夕立 — 大暑 大雨時行</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500&family=EB+Garamond:ital@1&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#2c3138;touch-action:none;overscroll-behavior:none}
+  canvas{display:block}
+  #frame{position:fixed; inset:16px; border:1px solid rgba(235,228,214,0.20); pointer-events:none;}
+  #tanzaku{
+    position:fixed; top:8vh; right:8vw; padding:2.2vmin 1.4vmin 3vmin;
+    background:rgba(240,235,221,0.90); border:1px solid rgba(62,52,40,0.14);
+    box-shadow:0 1px 6px rgba(10,12,16,0.18);
+    opacity:0; transition:opacity 3.5s ease; user-select:none; pointer-events:none;
+  }
+  #tanzaku .inner{display:flex; flex-direction:row-reverse;}
+  #title{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif; font-weight:500;
+    font-size:clamp(28px,5vmin,48px); letter-spacing:0.6em; color:#33302b;
+  }
+  #sub{
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif;
+    font-size:clamp(9px,1.4vmin,12px); letter-spacing:0.42em; color:rgba(51,48,43,0.55);
+    margin-right:1.1em; padding-top:0.4em;
+  }
+  #seal{
+    position:fixed; right:calc(8vw + 1vmin); top:calc(8vh + 38vmin);
+    width:clamp(20px,3vmin,28px); height:clamp(20px,3vmin,28px);
+    background:#b8432f; color:#ede6d3; border-radius:2px;
+    font-family:'Shippori Mincho',serif; font-size:clamp(12px,1.9vmin,17px);
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; transition:opacity 3.5s ease 2.2s; user-select:none; pointer-events:none;
+  }
+  #cap{
+    position:fixed; bottom:6.5vh; left:8vw;
+    font-family:'EB Garamond',serif; font-style:italic;
+    font-size:clamp(10px,1.5vmin,13px); letter-spacing:0.08em; color:rgba(235,228,214,0.42);
+    opacity:0; transition:opacity 3.5s ease 1.6s; user-select:none; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="frame"></div>
+<div id="tanzaku"><div class="inner"><div id="title">夕立</div><div id="sub">大暑 末候 大雨時行</div></div></div>
+<div id="seal">雨</div>
+<div id="cap">y&#363;dachi &mdash; let the sky cry itself clear</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// ==== 貴優ノブ ====
+const KNOBS = {
+  // --- 間(ま)の設計 ---
+  tameRain:    2.8,   // これを上げると、雨が降り始めるまでの「ため」が長くなる(秒)
+  tameTitle:   3.0,   // これを上げると、短冊が現れるまでの「ため」が長くなる(秒)
+  // --- 夕立の設計 ---
+  stormStart:  0.85,  // これを上げると、始まりの雨が重くなる(0..1)
+  calmStroke:  0.010, // これを上げると、ひと撫でで雨が早くなだまる
+  calmPerSec:  0.0035,// これを上げると、放っておいても雨が早く上がる(空が自分で泣き止む速さ)
+  regatherSec: 2.2,   // これを上げると、晴れた空に雨を呼び戻す長押しが長く要る(秒)
+  // --- 空の設計 ---
+  sunEl:       0.10,  // これを上げると、夕陽が高くなる(低いほど赤金が深い)
+  betaScale:   0.022, // これを上げると、空気が厚くなり色が濃くなる
+  mieAmt:      0.020, // これを上げると、夕陽のハロー(金)が強くなる
+  cloudScale:  2.6,   // これを上げると、雲のうねりが細かくなる
+  windSpeed:   0.016, // これを上げると、雲が速く流れる
+  // --- 雨の設計 ---
+  rainAmt:     0.55,  // これを上げると、雨脚が濃くなる
+  rainSpeed:   7.0,   // これを上げると、雨が速く落ちる
+  // --- 虹(気づき: 泣き止んだ空にだけ、一度だけ) ---
+  rainbowSec:  16,    // これを上げると、虹の滞在が長くなる(秒)
+  rainbowAmt:  0.30,  // これを上げると、虹が濃くなる(上げすぎ注意、品が落ちる)
+  // --- 音の設計 ---
+  rainGain:    0.14,  // これを上げると、雨音が大きくなる
+  thunderGain: 0.10,  // これを上げると、遠雷が大きくなる(怖くしないこと)
+  thunderGap:  14,    // これを上げると、遠雷の間隔が延びる(秒)
+  dripHz:      [587.33, 698.46, 783.99, 880.0, 1046.5], // 雨上がりの雫の音階(D5 F5 G5 A5 C6)
+  dripGain:    0.05,  // これを上げると、雨上がりの雫が大きくなる
+};
+// ==================
+
+import * as THREE from 'three';
+
+const scene = new THREE.Scene(), camera = new THREE.Camera();
+const renderer = new THREE.WebGLRenderer({antialias:false});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const uni = {
+  uTime:{value:0}, uRes:{value:new THREE.Vector2(1,1)},
+  uStorm:{value:KNOBS.stormStart}, uRainVis:{value:0},
+  uSunEl:{value:KNOBS.sunEl}, uBeta:{value:KNOBS.betaScale}, uMie:{value:KNOBS.mieAmt},
+  uCloud:{value:new THREE.Vector2(KNOBS.cloudScale, KNOBS.windSpeed)},
+  uRain:{value:new THREE.Vector2(KNOBS.rainAmt, KNOBS.rainSpeed)},
+  uBow:{value:0},
+};
+const mat = new THREE.ShaderMaterial({
+  uniforms: uni,
+  vertexShader:`void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader:`
+    precision highp float;
+    uniform float uTime, uStorm, uRainVis, uSunEl, uBeta, uMie, uBow;
+    uniform vec2 uRes, uCloud, uRain;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+    float n2(vec2 p){
+      vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+      return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y);
+    }
+    float fbm(vec2 p){
+      float v=0.0, a=0.5;
+      for(int i=0;i<5;i++){ v+=a*n2(p); p=p*2.03+vec2(19.7,7.3); a*=0.5; }
+      return v;
+    }
+    void main(){
+      vec2 uv = gl_FragCoord.xy/uRes;
+      float aspect = uRes.x/uRes.y;
+      // ---- 大気(単一散乱近似) ----
+      float el = mix(-0.02, 0.75, uv.y);
+      float m  = 1.0/(max(el,0.0)+0.09);
+      float ms = 1.0/(uSunEl+0.09);
+      vec3 beta = vec3(5.8, 13.5, 33.1)*uBeta;
+      vec3 sunT = exp(-beta*ms);
+      vec3 sky  = (1.0-exp(-beta*m)) * sunT * 1.7;
+      vec2 sunPos = vec2(0.38, uSunEl*0.9+0.08);
+      float sunD = distance(vec2(uv.x*aspect, uv.y), vec2(sunPos.x*aspect, sunPos.y));
+      float g = 0.82;
+      float hg = (1.0-g*g)/pow(1.0+g*g-2.0*g*clamp(1.0-sunD*2.0,-1.,1.), 1.5);
+      sky += vec3(1.0,0.82,0.55) * hg * uMie * sunT * 60.0;
+      // 嵐の間、背後の空は色を失う(雲間が錆に見えないように)
+      sky = mix(sky, vec3(dot(sky,vec3(0.333)))*vec3(0.88,0.94,1.04), uStorm*0.8);
+      // 雨上がりの上空は藍鼠に沈む(金と藍)
+      sky = mix(sky, vec3(0.115,0.15,0.21), smoothstep(0.30,0.78,uv.y)*(1.0-uStorm)*0.7);
+      // ---- 雲(墨の乱雲。stormで厚く垂れ込める) ----
+      vec2 cp = vec2(uv.x*aspect, uv.y)*uCloud.x + vec2(uTime*uCloud.y, 0.0);
+      float warp = fbm(cp*1.7 + uTime*uCloud.y*0.6);
+      float cl = fbm(cp + warp*1.4);
+      float cover = smoothstep(0.62-uStorm*0.55, 0.98-uStorm*0.35, cl + (uv.y*0.28)*uStorm);
+      vec3 cloudDark = mix(vec3(0.22,0.23,0.26), vec3(0.38,0.36,0.36), warp);      // 墨の腹
+      vec3 cloudLit  = cloudDark + sunT*vec3(0.55,0.42,0.28)*(1.0-uStorm)*1.2;     // 晴れ間は金に縁どられる
+      vec3 cloud = mix(cloudDark, cloudLit, smoothstep(0.4,0.95,1.0-sunD));
+      sky = mix(sky, cloud, cover*min(1.0, 0.35+uStorm*0.75));
+      // ---- 虹(泣き止んだ空にだけ) ----
+      if(uBow > 0.001){
+        vec2 bc = vec2(0.62*aspect, -0.18);
+        float br = distance(vec2(uv.x*aspect, uv.y), bc);
+        float band = (br-0.72)/0.085;
+        if(band>0.0 && band<1.0){
+          vec3 bowc = 0.5+0.5*cos(6.2832*(band*0.9 + vec3(0.0,0.33,0.67)));
+          sky = mix(sky, bowc, uBow*sin(3.1416*band)*0.5*smoothstep(0.1,0.4,uv.y));
+        }
+      }
+      // ---- 山の端(墨のシルエット) ----
+      float ridge = 0.17 + 0.055*fbm(vec2(uv.x*2.6+7.0, 0.0)) - 0.02*fbm(vec2(uv.x*9.0, 3.0));
+      float hill = smoothstep(ridge+0.003, ridge-0.003, uv.y);
+      vec3 hillc = mix(vec3(0.10,0.11,0.13), vec3(0.16,0.15,0.16), sunT.r*(1.0-uStorm));
+      sky = mix(sky, hillc, hill);
+      // ---- 雨(スクリーン空間の斜めの糸) ----
+      float rain = 0.0;
+      if(uRainVis > 0.001){
+        vec2 rp = vec2(uv.x*aspect + uv.y*0.13, uv.y);
+        for(float k=0.0;k<2.0;k++){
+          vec2 q = rp*vec2(90.0+k*40.0, 7.0+k*3.0) + vec2(0.0, uTime*uRain.y*(1.0+k*0.35));
+          float streak = step(0.965 - uRainVis*uRain.x*0.03, h(vec2(floor(q.x), floor(q.y*0.25))));
+          rain += streak * smoothstep(0.0,0.4,fract(q.y)) * smoothstep(1.0,0.6,fract(q.y)) * (0.5-k*0.15);
+        }
+        rain *= uRainVis;
+      }
+      sky = mix(sky, vec3(0.75,0.78,0.80)*max(sky, vec3(0.25)), rain*0.5);
+      // ---- 和紙の肌と暮色 ----
+      sky = vec3(1.0)-exp(-sky*1.35);                     // トーンマップ
+      sky *= 1.0 - 0.09*smoothstep(0.5, 1.05, distance(uv*vec2(aspect,1.0), vec2(0.5*aspect,0.5)));
+      sky *= 0.97 + 0.05*n2(uv*vec2(340.0,90.0));         // 紙肌
+      gl_FragColor = vec4(sky, 1.0);
+    }`
+});
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2), mat));
+
+function layout(){
+  renderer.setSize(innerWidth, innerHeight);
+  const pr = renderer.getPixelRatio();
+  uni.uRes.value.set(innerWidth*pr, innerHeight*pr);
+}
+layout();
+addEventListener('resize', layout);
+
+// ---- 音(雨・遠雷・雫) ----
+let actx=null, noiseBuf=null, rainSrc=null, rainGainNode=null;
+function audioInit(){
+  if(actx) return;
+  actx = new (window.AudioContext||window.webkitAudioContext)();
+  const len = actx.sampleRate*2;
+  noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=Math.random()*2-1;
+  rainSrc = actx.createBufferSource(); rainSrc.buffer=noiseBuf; rainSrc.loop=true;
+  const lp = actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1400;
+  rainGainNode = actx.createGain(); rainGainNode.gain.value=0;
+  rainSrc.connect(lp).connect(rainGainNode).connect(actx.destination);
+  rainSrc.start();
+}
+function thunder(){
+  if(!actx) return;
+  const src=actx.createBufferSource(); src.buffer=noiseBuf; src.playbackRate.value=0.35;
+  const lp=actx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=110;
+  const g=actx.createGain(); const t=actx.currentTime;
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(KNOBS.thunderGain, t+0.7);                 // ゆっくり届く遠雷
+  g.gain.exponentialRampToValueAtTime(0.0001, t+3.4);
+  src.connect(lp).connect(g).connect(actx.destination);
+  src.start(t); src.stop(t+3.6);
+}
+function drip(){
+  if(!actx) return;
+  const o=actx.createOscillator(); o.type='sine';
+  o.frequency.value = KNOBS.dripHz[Math.floor(hash1(dripN++*7)*KNOBS.dripHz.length)];
+  const g=actx.createGain(); const t=actx.currentTime;
+  g.gain.setValueAtTime(0,t);
+  g.gain.linearRampToValueAtTime(KNOBS.dripGain, t+0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+0.6);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t+0.65);
+  o.frequency.exponentialRampToValueAtTime(o.frequency.value*0.985, t+0.5);
+}
+function hash1(i){ const s=Math.sin(i*127.1)*43758.5453; return s-Math.floor(s); }
+
+// ---- 状態: 夕立の一部始終 ----
+let storm = KNOBS.stormStart, bow = 0, bowT0 = -1, bowDone = false;
+if(location.hash.length>1){ const v=parseFloat(location.hash.slice(1)); if(!isNaN(v)) storm=v; } // 検証用: #0.1 で雨上がりから
+let holdT = 0, holding = false, lastStroke = 0, dripN = 0, nextDrip = 0, nextThunder = 6;
+
+addEventListener('pointerdown', ()=>{ audioInit(); holding = true; holdT = 0; });
+addEventListener('pointerup', ()=>{ holding = false; });
+addEventListener('pointermove', e=>{
+  if(e.pointerType==='mouse' && e.buttons===0) return;
+  if(tNow - lastStroke < 0.06) return;
+  lastStroke = tNow;
+  if(storm > 0.02) storm = Math.max(0, storm - KNOBS.calmStroke);  // 撫でてなだめる
+});
+
+// ---- 主ループ ----
+const t0 = performance.now();
+let tNow=0, tPrev=0, titleShown=false;
+function loop(){
+  requestAnimationFrame(loop);
+  tNow = (performance.now()-t0)/1000;
+  const dt = Math.min(0.05, tNow-tPrev); tPrev = tNow;
+  // 空は自分でも少しずつ泣き止む
+  if(storm > 0) storm = Math.max(0, storm - KNOBS.calmPerSec*dt);
+  // 晴れた空を長押しすると、雨が呼び戻される(空はまた泣ける)
+  if(holding && storm < 0.05){
+    holdT += dt;
+    if(holdT > KNOBS.regatherSec){ storm = Math.min(0.8, storm + dt*0.35); bowDone = false; }
+  } else holdT = 0;
+  // 虹: 泣き止んだ直後に一度だけ
+  if(!bowDone && storm < 0.12 && bowT0 < 0 && tNow > 10) bowT0 = tNow + 2.5;
+  if(bowT0 > 0){
+    const p = (tNow-bowT0)/KNOBS.rainbowSec;
+    if(p >= 1){ bow = 0; bowT0 = -1; bowDone = true; }
+    else if(p > 0) bow = Math.sin(Math.PI*p) * KNOBS.rainbowAmt;
+  }
+  if(storm > 0.6) bowDone = false;
+  // 雨の見え方: ためのあと降り始める
+  const rainVis = Math.min(1, Math.max(0, (tNow-KNOBS.tameRain)/3)) * Math.pow(storm, 1.4);
+  uni.uTime.value = tNow; uni.uStorm.value = storm; uni.uRainVis.value = rainVis; uni.uBow.value = bow;
+  // 音
+  if(rainGainNode) rainGainNode.gain.setTargetAtTime(rainVis*KNOBS.rainGain, actx.currentTime, 0.4);
+  if(actx && storm > 0.45 && tNow > nextThunder){ thunder(); nextThunder = tNow + KNOBS.thunderGap*(0.6+hash1(dripN+tNow|0)); }
+  if(actx && storm < 0.15 && tNow > nextDrip){ drip(); nextDrip = tNow + 1.5 + hash1(dripN*13)*4.5; }
+  if(!titleShown && tNow > KNOBS.tameTitle){
+    titleShown = true;
+    for(const id of ['tanzaku','seal','cap']) document.getElementById(id).style.opacity=1;
+  }
+  renderer.render(scene, camera);
+}
+loop();
+</script>
+</body>
+</html>

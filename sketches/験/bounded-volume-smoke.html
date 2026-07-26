@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>験 — 封じた煙</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#14120f}canvas{display:block}</style>
+</head>
+<body>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"}}</script>
+<script type="module">
+// ==== 貴優ノブ ====
+const KNOBS = {
+  steps:   36,    // これを上げると煙の断面が滑らかになる(そのぶん重くなる)
+  density: 10.0,  // これを上げると煙が濃くなる
+  radius:  0.36,  // これを上げると封じる球が大きくなる
+  rise:    0.10,  // これを上げると煙の立ち上りが速くなる
+};
+// ==================
+// カード「封じた煙 — 有界ボリューム単パス行進」の最小再実装。
+// 球の内側だけを直交レイで行進し、fbm密度を積算して透過率にする。
+
+import * as THREE from 'three';
+
+const renderer = new THREE.WebGLRenderer({ antialias:false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const uniforms = {
+  uTime:    { value: 0 },
+  uRes:     { value: new THREE.Vector2(innerWidth, innerHeight) },
+  uSteps:   { value: KNOBS.steps },
+  uDensity: { value: KNOBS.density },
+  uRadius:  { value: KNOBS.radius },
+  uRise:    { value: KNOBS.rise },
+};
+
+const frag = /* glsl */`
+varying vec2 vUv;
+uniform float uTime; uniform vec2 uRes;
+uniform int uSteps; uniform float uDensity, uRadius, uRise;
+
+float hash13(vec3 p){ p=fract(p*0.1031); p+=dot(p,p.yzx+33.33); return fract((p.x+p.y)*p.z); }
+float vnoise(vec3 x){
+  vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
+  return mix(
+    mix(mix(hash13(i),hash13(i+vec3(1,0,0)),f.x), mix(hash13(i+vec3(0,1,0)),hash13(i+vec3(1,1,0)),f.x), f.y),
+    mix(mix(hash13(i+vec3(0,0,1)),hash13(i+vec3(1,0,1)),f.x), mix(hash13(i+vec3(0,1,1)),hash13(i+vec3(1,1,1)),f.x), f.y),
+    f.z);
+}
+float fbm(vec3 p){ float a=0.5,s=0.0; for(int i=0;i<3;i++){ s+=a*vnoise(p); p*=2.13; a*=0.5; } return s; }
+
+void main(){
+  vec2 p = (vUv-0.5)*vec2(uRes.x/uRes.y,1.0);
+  vec3 col = vec3(0.078,0.071,0.059); // 墨
+  float d = length(p);
+  float R = uRadius;
+  if(d < R){
+    float zr = sqrt(R*R - d*d);            // 球を貫く区間だけ行進する(有界の核心)
+    float jit = hash13(vec3(gl_FragCoord.xy, uTime)); // 開始位置をずらして縞を消す(罠2)
+    float den = 0.0;
+    for(int i=0;i<64;i++){
+      if(i>=uSteps) break;
+      float z = mix(-zr, zr, (float(i)+jit)/float(uSteps));
+      vec3 q = vec3(p, z);
+      float edge = smoothstep(R, R*0.55, length(q)); // 淵で密度を絞る(罠3)
+      float n = fbm(q*4.0 + vec3(0.0, -uTime*uRise*4.0, 0.0));
+      den += max(n-0.38,0.0) * edge;
+    }
+    den = den/float(uSteps)*uDensity;
+    float alpha = 1.0-exp(-den);
+    col = mix(col, vec3(0.80,0.81,0.83), alpha);
+  }
+  gl_FragColor = vec4(col,1.0);
+}`;
+
+const mesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(2,2),
+  new THREE.ShaderMaterial({ uniforms,
+    vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }`,
+    fragmentShader: frag })
+);
+mesh.frustumCulled = false;
+const scene = new THREE.Scene(); scene.add(mesh);
+const cam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+
+addEventListener('resize', ()=>{ renderer.setSize(innerWidth,innerHeight); uniforms.uRes.value.set(innerWidth,innerHeight); });
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(()=>{ uniforms.uTime.value = clock.getElapsedTime(); renderer.render(scene,cam); });
+</script>
+</body>
+</html>
